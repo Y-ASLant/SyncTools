@@ -231,7 +231,7 @@ pub async fn start_sync(
             ..Default::default()
         };
         
-        tracing::info!("同步配置: 并行数={}, 自动创建目录={}", concurrent, auto_create);
+        tracing::debug!("同步配置: 并行数={}, 自动创建目录={}", concurrent, auto_create);
         
         let engine = Arc::new(SyncEngine::with_config(db_clone, config));
         let engine_for_cancel = engine.clone();
@@ -297,7 +297,7 @@ pub async fn pause_sync(job_id: String, state: State<'_, AppState>) -> Result<()
     let mut signals = state.cancel_signals.lock().await;
     if let Some(sender) = signals.remove(&job_id) {
         let _ = sender.send(());
-        tracing::info!("同步任务已暂停: {}", job_id);
+        tracing::debug!("同步任务已暂停: {}", job_id);
         Ok(())
     } else {
         Err("没有正在运行的同步任务".to_string())
@@ -363,7 +363,7 @@ pub async fn resume_sync(
         return start_sync(job_id, auto_create_dir, max_concurrent, state, app).await;
     }
 
-    tracing::info!(
+    tracing::debug!(
         "恢复同步任务: {}, 有 {} 个未完成的传输",
         job_id,
         pending.len()

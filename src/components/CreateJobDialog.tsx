@@ -12,6 +12,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { cn } from "../lib/utils";
+import { MessageDialog } from "./MessageDialog";
 import type {
   StorageType,
   SyncMode,
@@ -78,8 +79,27 @@ export function CreateJobDialog({
   >({});
   const [visible, setVisible] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
+  const [messageDialog, setMessageDialog] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    type: "info" | "success" | "error";
+  }>({
+    isOpen: false,
+    title: "",
+    message: "",
+    type: "info",
+  });
 
   const isEditing = !!editJob;
+
+  const showMessage = (
+    title: string,
+    message: string,
+    type: "info" | "success" | "error" = "info"
+  ) => {
+    setMessageDialog({ isOpen: true, title, message, type });
+  };
 
   useEffect(() => {
     if (isOpen) {
@@ -210,7 +230,7 @@ export function CreateJobDialog({
     // 验证表单
     const error = validateForm();
     if (error) {
-      alert(error);
+      showMessage("提示", error, "info");
       return;
     }
 
@@ -263,7 +283,11 @@ export function CreateJobDialog({
       handleClose();
     } catch (error) {
       console.error(isEditing ? "更新任务失败:" : "创建任务失败:", error);
-      alert((isEditing ? "更新任务失败: " : "创建任务失败: ") + error);
+      showMessage(
+        isEditing ? "更新任务失败" : "创建任务失败",
+        String(error),
+        "error"
+      );
     } finally {
       setIsCreating(false);
     }
@@ -756,6 +780,15 @@ export function CreateJobDialog({
           </div>
         </div>
       </div>
+
+      {/* 消息弹窗 */}
+      <MessageDialog
+        isOpen={messageDialog.isOpen}
+        title={messageDialog.title}
+        message={messageDialog.message}
+        type={messageDialog.type}
+        onClose={() => setMessageDialog({ ...messageDialog, isOpen: false })}
+      />
     </div>
   );
 }

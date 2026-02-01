@@ -188,20 +188,20 @@ impl SyncEngine {
         // 检测目标目录是否可访问
         match dest_storage.list_files(None).await {
             Ok(_) => {
-                info!("目标存储可访问");
+                debug!("目标存储可访问");
             }
             Err(e) => {
                 let err_str = e.to_string();
                 // 检测是否是目录不存在的错误 (409 Conflict 或 404 Not Found)
                 if err_str.contains("409") || err_str.contains("Conflict") || err_str.contains("404") || err_str.contains("NotFound") {
                     if self.config.auto_create_dir {
-                        info!("目标目录不存在，尝试自动创建...");
+                        debug!("目标目录不存在，尝试自动创建...");
                         // 尝试创建根目录
                         if let Err(create_err) = dest_storage.create_dir("/").await {
-                            warn!("创建根目录失败: {}", create_err);
+                            debug!("创建根目录失败: {}", create_err);
                             // 再次尝试 list 检查是否可用
                             if dest_storage.list_files(None).await.is_err() {
-                                error!("目标目录不存在且无法创建");
+                                warn!("目标目录不存在且无法创建");
                                 return Ok(self.create_failed_report(
                                     &job_id,
                                     start_time,
@@ -209,9 +209,9 @@ impl SyncEngine {
                                 ));
                             }
                         }
-                        info!("目标目录创建成功或已存在");
+                        debug!("目标目录创建成功或已存在");
                     } else {
-                        error!("目标目录不存在或无法访问");
+                        warn!("目标目录不存在或无法访问");
                         return Ok(self.create_failed_report(
                             &job_id,
                             start_time,
@@ -302,7 +302,7 @@ impl SyncEngine {
         let dest_tree = if is_remote_dest {
             // 尝试从缓存加载
             if let Some(cached) = cache.load(&job_id, "dest", &dest_config_json) {
-                info!("使用缓存的目标文件列表 ({} 个文件)", cached.len());
+                debug!("使用缓存的目标文件列表 ({} 个文件)", cached.len());
                 self.send_progress(
                     &progress_tx,
                     SyncProgress {
@@ -379,7 +379,7 @@ impl SyncEngine {
         };
 
         let files_scanned = (source_tree.len() + dest_tree.len()) as u32;
-        info!(
+        debug!(
             "扫描完成: 源 {} 文件, 目标 {} 文件",
             source_tree.len(),
             dest_tree.len()
@@ -438,7 +438,7 @@ impl SyncEngine {
         
         // 计算需要检查的文件的 hash
         if !files_to_hash.is_empty() {
-            info!("检查 {} 个文件的 hash 是否变化...", files_to_hash.len());
+            debug!("检查 {} 个文件的 hash 是否变化...", files_to_hash.len());
             
             for (path, _) in &files_to_hash {
                 if let Some(saved) = saved_states.get(path) {
@@ -473,7 +473,7 @@ impl SyncEngine {
         
         let summary = FileComparator::summarize_actions(&actions);
 
-        info!(
+        debug!(
             "比较完成: {} 个操作, {} 个复制, {} 个删除, {} 个跳过 (hash匹配跳过: {}), {} 个冲突",
             actions.len(),
             summary.copy_count + summary.reverse_copy_count,
@@ -586,7 +586,7 @@ impl SyncEngine {
         // 同步完成后清除缓存（文件列表已变化）
         if is_remote_dest && (files_copied > 0 || files_deleted > 0) {
             cache.clear(&job_id);
-            info!("已清除目标存储缓存");
+            debug!("已清除目标存储缓存");
         }
 
         Ok(SyncReport {
@@ -773,7 +773,7 @@ impl SyncEngine {
             if let Err(e) = state_manager.batch_upsert(&states_to_save).await {
                 warn!("保存文件状态失败: {}", e);
             } else {
-                info!("已保存 {} 个文件的同步状态", states_to_save.len());
+                debug!("已保存 {} 个文件的同步状态", states_to_save.len());
             }
         }
 
@@ -886,20 +886,20 @@ impl SyncEngine {
                     (source, dest, source_path.as_str(), dest_path.as_str())
                 };
 
-                info!(
+                debug!(
                     "复制: {} -> {} ({}字节, reverse={})",
                     from_path, to_path, size, reverse
                 );
 
                 let data = from.read(from_path).await?;
-                info!("  读取完成: {} 实际{}字节", from_path, data.len());
+                debug!("  读取完成: {} 实际{}字节", from_path, data.len());
 
                 // 计算文件 hash（用于增量同步）
                 let file_hash = calculate_quick_hash(&data);
                 let file_size = data.len() as i64;
 
                 to.write(to_path, data).await?;
-                info!("  写入完成: {}", to_path);
+                debug!("  写入完成: {}", to_path);
 
                 Ok(ActionResult {
                     bytes: *size,

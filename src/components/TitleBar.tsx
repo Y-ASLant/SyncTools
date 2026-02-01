@@ -5,22 +5,16 @@ import {
   X,
   Maximize2,
   Minimize2,
-  Sun,
-  Moon,
   Settings,
 } from "lucide-react";
 
 interface TitleBarProps {
   title?: string;
-  isDarkMode?: boolean;
-  onToggleDarkMode?: () => void;
   onOpenSettings?: () => void;
 }
 
 export function TitleBar({
   title = "SyncTools",
-  isDarkMode,
-  onToggleDarkMode,
   onOpenSettings,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
@@ -63,19 +57,6 @@ export function TitleBar({
       {/* 右侧按钮区 */}
       <div className="flex h-full items-center gap-0.5 px-1">
         {/* 功能按钮 */}
-        {onToggleDarkMode && (
-          <button
-            onClick={onToggleDarkMode}
-            className="w-7 h-7 flex items-center justify-center rounded hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
-            title="切换主题"
-          >
-            {isDarkMode ? (
-              <Sun className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-            ) : (
-              <Moon className="w-4 h-4 text-slate-500 dark:text-slate-400" />
-            )}
-          </button>
-        )}
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}

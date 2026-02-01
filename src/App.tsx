@@ -31,8 +31,6 @@ function App() {
   const {
     jobs,
     progress,
-    isDarkMode,
-    toggleDarkMode,
     setProgress,
     removeJob,
     clearProgress,
@@ -78,7 +76,7 @@ function App() {
           // 延迟显示错误，避免在初始化时出现问题
           setTimeout(() => {
             if (mounted) {
-              alert("加载任务失败: " + err);
+              showError("加载任务失败: " + err);
             }
           }, 100);
         }
@@ -262,8 +260,6 @@ function App() {
     >
       {/* 自定义标题栏 */}
       <TitleBar
-        isDarkMode={isDarkMode}
-        onToggleDarkMode={toggleDarkMode}
         onOpenSettings={() => setIsSettingsOpen(true)}
       />
 

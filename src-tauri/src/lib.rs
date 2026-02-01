@@ -7,6 +7,7 @@ use tokio::sync::Mutex;
 pub mod commands;
 pub mod core;
 pub mod db;
+pub mod logging;
 pub mod storage;
 
 pub use core::{SyncConfig, SyncEngine, SyncReport};
@@ -41,10 +42,10 @@ impl AppState {
                     if let Some(custom_path) = config.get("data_path").and_then(|v| v.as_str()) {
                         let custom_dir = PathBuf::from(custom_path);
                         if custom_dir.exists() && custom_dir.is_dir() {
-                            tracing::info!("使用自定义数据路径: {:?}", custom_dir);
+                            tracing::debug!("使用自定义数据路径: {:?}", custom_dir);
                             custom_dir
                         } else {
-                            tracing::warn!("自定义数据路径无效，使用默认路径");
+                            tracing::debug!("自定义数据路径无效，使用默认路径");
                             default_config_dir
                         }
                     } else {

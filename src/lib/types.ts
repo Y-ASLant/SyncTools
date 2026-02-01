@@ -84,3 +84,10 @@ export interface TestConnectionResult {
   message: string;
   details: string | null;
 }
+
+// 日志配置
+export interface LogConfig {
+  enabled: boolean;
+  maxSizeMb: number;
+  level: string;
+}

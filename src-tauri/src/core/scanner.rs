@@ -167,10 +167,10 @@ impl FileScanner {
             return Err(anyhow::anyhow!("操作已取消"));
         }
 
-        info!("开始扫描存储: {}, prefix: {:?}", storage.name(), prefix);
+        debug!("开始扫描存储: {}, prefix: {:?}", storage.name(), prefix);
 
         let files = storage.list_files(prefix).await?;
-        info!("list_files 返回 {} 个条目", files.len());
+        debug!("list_files 返回 {} 个条目", files.len());
 
         // 检查是否已取消
         if self.is_cancelled() {
