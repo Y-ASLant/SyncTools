@@ -6,7 +6,7 @@ pub mod file_state;
 pub mod scanner;
 pub mod transfer;
 
-pub use cache::FileListCache;
+pub use cache::{CacheResult, FileListCache};
 pub use comparator::{ActionSummary, CompareConfig, ConflictType, FileComparator, SyncAction};
 pub use conflict::{ConflictRecord, ConflictResolution, ConflictResolver};
 pub use engine::{SyncConfig, SyncEngine, SyncReport};

@@ -34,14 +34,20 @@ pub struct DiffResult {
     pub skip_count: usize,
     pub conflict_count: usize,
     pub total_bytes: u64,
+    /// 源缓存时间（Unix时间戳，0表示未使用缓存）
+    pub source_cached_at: u64,
+    /// 目标缓存时间（Unix时间戳，0表示未使用缓存）
+    pub dest_cached_at: u64,
 }
 
 /// 分析同步任务（不执行同步，只返回差异）
 #[tauri::command]
 pub async fn analyze_job(
     job_id: String,
+    force_refresh: Option<bool>,
     state: State<'_, AppState>,
 ) -> Result<DiffResult, String> {
+    let force_refresh = force_refresh.unwrap_or(false);
     // 创建取消标志
     let cancel_flag = Arc::new(AtomicBool::new(false));
     state
@@ -82,34 +88,102 @@ pub async fn analyze_job(
         return Err("操作已取消".to_string());
     }
 
-    // 扫描文件（带取消检查）
+    // 初始化缓存（只对远程存储使用缓存），缓存目录跟随数据存储目录
+    let cache_dir = state.config_dir.join("cache");
+    
+    // 从配置读取缓存 TTL，本地存储不使用缓存
+    let cache_config = crate::config::CacheConfig::load(&state.config_dir);
+    let source_is_local = matches!(job.sourceConfig.typ, crate::db::StorageType::Local);
+    let dest_is_local = matches!(job.destConfig.typ, crate::db::StorageType::Local);
+    let source_ttl = if source_is_local { 0 } else { cache_config.remote_ttl };
+    let dest_ttl = if dest_is_local { 0 } else { cache_config.remote_ttl };
+    
+    let source_cache = crate::core::FileListCache::new(cache_dir.clone()).with_ttl(source_ttl);
+    let dest_cache = crate::core::FileListCache::new(cache_dir).with_ttl(dest_ttl);
+    
+    let source_config_json = serde_json::to_string(&job.sourceConfig).unwrap_or_default();
+    let dest_config_json = serde_json::to_string(&job.destConfig).unwrap_or_default();
+
+    // 如果强制刷新，先清除缓存
+    if force_refresh {
+        source_cache.clear(&job_id);
+    }
+
+    // 扫描源存储（支持缓存）
     let scanner = FileScanner::with_cancel(cancel_flag.clone());
-    let source_tree = scanner
-        .scan_storage(source_storage.as_ref(), None)
-        .await
-        .map_err(|e| {
-            if cancel_flag.load(Ordering::Relaxed) {
-                "操作已取消".to_string()
-            } else {
-                format!("扫描源存储失败: {}", e)
-            }
-        })?;
+    let mut source_cached_at: u64 = 0;
+    let source_tree = if !force_refresh {
+        if let Some(cached) = source_cache.load(&job_id, "source", &source_config_json) {
+            source_cached_at = cached.cached_at;
+            cached.files
+        } else {
+            let tree = scanner
+                .scan_storage(source_storage.as_ref(), None)
+                .await
+                .map_err(|e| {
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        "操作已取消".to_string()
+                    } else {
+                        format!("扫描源存储失败: {}", e)
+                    }
+                })?;
+            let _ = source_cache.save(&job_id, "source", &source_config_json, &tree);
+            tree
+        }
+    } else {
+        let tree = scanner
+            .scan_storage(source_storage.as_ref(), None)
+            .await
+            .map_err(|e| {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    "操作已取消".to_string()
+                } else {
+                    format!("扫描源存储失败: {}", e)
+                }
+            })?;
+        let _ = source_cache.save(&job_id, "source", &source_config_json, &tree);
+        tree
+    };
 
     // 检查是否已取消
     if cancel_flag.load(Ordering::Relaxed) {
         return Err("操作已取消".to_string());
     }
 
-    let dest_tree = scanner
-        .scan_storage(dest_storage.as_ref(), None)
-        .await
-        .map_err(|e| {
-            if cancel_flag.load(Ordering::Relaxed) {
-                "操作已取消".to_string()
-            } else {
-                format!("扫描目标存储失败: {}", e)
-            }
-        })?;
+    // 扫描目标存储（支持缓存）
+    let mut dest_cached_at: u64 = 0;
+    let dest_tree = if !force_refresh {
+        if let Some(cached) = dest_cache.load(&job_id, "dest", &dest_config_json) {
+            dest_cached_at = cached.cached_at;
+            cached.files
+        } else {
+            let tree = scanner
+                .scan_storage(dest_storage.as_ref(), None)
+                .await
+                .map_err(|e| {
+                    if cancel_flag.load(Ordering::Relaxed) {
+                        "操作已取消".to_string()
+                    } else {
+                        format!("扫描目标存储失败: {}", e)
+                    }
+                })?;
+            let _ = dest_cache.save(&job_id, "dest", &dest_config_json, &tree);
+            tree
+        }
+    } else {
+        let tree = scanner
+            .scan_storage(dest_storage.as_ref(), None)
+            .await
+            .map_err(|e| {
+                if cancel_flag.load(Ordering::Relaxed) {
+                    "操作已取消".to_string()
+                } else {
+                    format!("扫描目标存储失败: {}", e)
+                }
+            })?;
+        let _ = dest_cache.save(&job_id, "dest", &dest_config_json, &tree);
+        tree
+    };
 
     // 比较文件
     let comparator = FileComparator::default();
@@ -171,6 +245,8 @@ pub async fn analyze_job(
         skip_count: summary.skip_count,
         conflict_count: summary.conflict_count,
         total_bytes: summary.total_transfer_bytes(),
+        source_cached_at,
+        dest_cached_at,
     })
 }
 
@@ -180,11 +256,13 @@ pub async fn start_sync(
     job_id: String,
     auto_create_dir: Option<bool>,
     max_concurrent: Option<usize>,
+    conflict_resolutions: Option<std::collections::HashMap<String, String>>,
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<String, String> {
     let auto_create = auto_create_dir.unwrap_or(true);
     let concurrent = max_concurrent.unwrap_or(4).clamp(1, 128); // 限制在 1-128 之间
+    let resolutions = conflict_resolutions.unwrap_or_default();
     // 从数据库加载任务
     let job = SyncJob::load(&state.db, &job_id)
         .await
@@ -223,15 +301,22 @@ pub async fn start_sync(
     let job_for_sync = job.clone();
     let app_for_emit = app.clone();
     let cancel_signals = state.cancel_signals.clone();
+    let cache_dir = state.config_dir.join("cache");
+    let cache_config = crate::config::CacheConfig::load(&state.config_dir);
 
+    let resolutions_for_sync = resolutions.clone();
     tokio::spawn(async move {
         let config = crate::core::SyncConfig {
             auto_create_dir: auto_create,
             max_concurrent_transfers: concurrent,
+            conflict_resolutions: resolutions_for_sync,
+            cache_dir: Some(cache_dir),
+            remote_cache_ttl: cache_config.remote_ttl,
             ..Default::default()
         };
         
-        tracing::debug!("同步配置: 并行数={}, 自动创建目录={}", concurrent, auto_create);
+        tracing::debug!("同步配置: 并行数={}, 自动创建目录={}, 冲突解决方案数={}", 
+            concurrent, auto_create, config.conflict_resolutions.len());
         
         let engine = Arc::new(SyncEngine::with_config(db_clone, config));
         let engine_for_cancel = engine.clone();
@@ -346,7 +431,7 @@ pub async fn resume_sync(
 
     if pending.is_empty() {
         // 没有未完成的传输，执行正常同步
-        return start_sync(job_id, auto_create_dir, max_concurrent, state, app).await;
+        return start_sync(job_id, auto_create_dir, max_concurrent, None, state, app).await;
     }
 
     tracing::debug!(
@@ -356,7 +441,7 @@ pub async fn resume_sync(
     );
 
     // 重新开始同步（会自动跳过已完成的文件）
-    start_sync(job_id, auto_create_dir, max_concurrent, state, app).await
+    start_sync(job_id, auto_create_dir, max_concurrent, None, state, app).await
 }
 
 /// 同步历史记录条目
@@ -428,4 +513,27 @@ pub async fn get_sync_history(
             error_message: log.error_message,
         })
         .collect())
+}
+
+/// 清除任务的扫描缓存
+#[tauri::command]
+pub async fn clear_scan_cache(
+    job_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let cache_dir = state.config_dir.join("cache");
+    let cache = crate::core::FileListCache::new(cache_dir);
+    
+    match job_id {
+        Some(id) => {
+            cache.clear(&id);
+            tracing::info!("已清除任务 {} 的扫描缓存", id);
+        }
+        None => {
+            cache.clear_all();
+            tracing::info!("已清除所有扫描缓存");
+        }
+    }
+    
+    Ok(())
 }

@@ -11,6 +11,7 @@ import {
   Database,
   FileText,
   HardDrive,
+  Clock,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -18,7 +19,8 @@ import { cn } from "../lib/utils";
 import { useSyncStore } from "../lib/store";
 import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
-import type { LogConfig } from "../lib/types";
+import { Switch } from "./Switch";
+import type { LogConfig, CacheConfig } from "../lib/types";
 
 // shadcn 风格的 Select 组件
 interface SelectOption {
@@ -74,7 +76,7 @@ function Select({ value, onChange, options }: SelectProps) {
       </button>
 
       {isOpen && (
-        <div className="absolute right-0 top-full mt-1 z-50 w-full max-h-48 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg py-1 animate-in fade-in-0 zoom-in-95 scrollable">
+        <div className="absolute right-0 bottom-full mb-1 z-50 w-full max-h-48 overflow-y-auto rounded-md border border-slate-200 dark:border-slate-600 bg-white dark:bg-slate-800 shadow-lg py-1 animate-in fade-in-0 zoom-in-95 scrollable">
           {options.map((option) => (
             <button
               key={option.value}
@@ -125,6 +127,9 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   // 日志配置状态
   const [logEnabled, setLogEnabled] = useState(true);
   const [logMaxSize, setLogMaxSize] = useState(5);
+  
+  // 缓存配置状态（只对远程存储使用缓存）
+  const [remoteCacheTtl, setRemoteCacheTtl] = useState(1800);
 
   // 使用统一的弹窗 Hook
   const { visible, isClosing, handleClose } = useDialog(isOpen, onClose);
@@ -138,6 +143,12 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
         .then((config) => {
           setLogEnabled(config.enabled);
           setLogMaxSize(config.maxSizeMb);
+        })
+        .catch(console.error);
+      // 加载缓存配置
+      invoke<CacheConfig>("get_cache_config")
+        .then((config) => {
+          setRemoteCacheTtl(config.remoteTtl);
         })
         .catch(console.error);
     }
@@ -165,6 +176,15 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
       if (maxSizeMb !== undefined) setLogMaxSize(newMaxSize);
     } catch (err) {
       console.error("保存日志配置失败:", err);
+    }
+  };
+
+  const handleCacheConfigChange = async (remoteTtl: number) => {
+    try {
+      await invoke("set_cache_config", { remoteTtl });
+      setRemoteCacheTtl(remoteTtl);
+    } catch (err) {
+      console.error("保存缓存配置失败:", err);
     }
   };
 
@@ -393,7 +413,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   ]}
                 />
               </div>
-              <label className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer">
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-md bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
                     <FolderPlus className="w-3.5 h-3.5 text-green-500" />
@@ -402,30 +422,36 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     自动创建目录
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={autoCreateDir}
-                  onClick={() => {
-                    const newValue = !autoCreateDir;
-                    setAutoCreateDir(newValue);
-                    localStorage.setItem("auto-create-dir", String(newValue));
+                <Switch
+                  checked={autoCreateDir}
+                  onChange={(v) => {
+                    setAutoCreateDir(v);
+                    localStorage.setItem("auto-create-dir", String(v));
                   }}
-                  className={cn(
-                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800",
-                    autoCreateDir
-                      ? "bg-blue-500"
-                      : "bg-slate-200 dark:bg-slate-600",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "pointer-events-none inline-block h-4 w-4 mt-0.5 ml-0.5 transform rounded-full bg-white shadow transition-transform",
-                      autoCreateDir ? "translate-x-4" : "translate-x-0",
-                    )}
-                  />
-                </button>
-              </label>
+                />
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-md bg-cyan-50 dark:bg-cyan-900/20 flex items-center justify-center">
+                    <Clock className="w-3.5 h-3.5 text-cyan-500" />
+                  </div>
+                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                    远程缓存过期
+                  </p>
+                </div>
+                <Select
+                  value={remoteCacheTtl}
+                  onChange={handleCacheConfigChange}
+                  options={[
+                    { value: 0, label: "不缓存" },
+                    { value: 300, label: "5 分钟" },
+                    { value: 600, label: "10 分钟" },
+                    { value: 1800, label: "30 分钟" },
+                    { value: 3600, label: "1 小时" },
+                    { value: 7200, label: "2 小时" },
+                  ]}
+                />
+              </div>
             </div>
           </div>
 
@@ -435,7 +461,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
               日志
             </h3>
             <div className="space-y-1">
-              <label className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors cursor-pointer">
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-md bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                     <FileText className="w-3.5 h-3.5 text-blue-500" />
@@ -444,26 +470,11 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     启用日志
                   </p>
                 </div>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={logEnabled}
-                  onClick={() => handleLogConfigChange(!logEnabled, undefined)}
-                  className={cn(
-                    "relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-slate-800",
-                    logEnabled
-                      ? "bg-blue-500"
-                      : "bg-slate-200 dark:bg-slate-600",
-                  )}
-                >
-                  <span
-                    className={cn(
-                      "pointer-events-none inline-block h-4 w-4 mt-0.5 ml-0.5 transform rounded-full bg-white shadow transition-transform",
-                      logEnabled ? "translate-x-4" : "translate-x-0",
-                    )}
-                  />
-                </button>
-              </label>
+                <Switch
+                  checked={logEnabled}
+                  onChange={(v) => handleLogConfigChange(v, undefined)}
+                />
+              </div>
               <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
                 <div className="flex items-center gap-2">
                   <div className="w-7 h-7 rounded-md bg-cyan-50 dark:bg-cyan-900/20 flex items-center justify-center">

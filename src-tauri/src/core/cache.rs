@@ -1,6 +1,6 @@
-//! 远程文件列表缓存
+//! 文件列表缓存
 //! 
-//! 用于缓存 WebDAV 等远程存储的文件列表，避免每次同步都重新扫描
+//! 用于缓存存储的文件列表，避免每次同步都重新扫描
 
 use crate::storage::FileInfo;
 use anyhow::Result;
@@ -21,10 +21,17 @@ pub struct CacheEntry {
     pub config_hash: String,
 }
 
+/// 缓存加载结果（包含文件列表和缓存时间）
+#[derive(Debug, Clone)]
+pub struct CacheResult {
+    pub files: HashMap<String, FileInfo>,
+    pub cached_at: u64,
+}
+
 /// 文件列表缓存管理器
 pub struct FileListCache {
     cache_dir: PathBuf,
-    /// 缓存有效期（秒）
+    /// 缓存有效期（秒），0 表示永不过期
     ttl_seconds: u64,
 }
 
@@ -34,11 +41,11 @@ impl FileListCache {
         let _ = std::fs::create_dir_all(&cache_dir);
         Self {
             cache_dir,
-            ttl_seconds: 300, // 默认 5 分钟
+            ttl_seconds: 0, // 默认永不过期，直到手动刷新
         }
     }
 
-    /// 设置缓存有效期
+    /// 设置缓存有效期（0 表示永不过期）
     pub fn with_ttl(mut self, seconds: u64) -> Self {
         self.ttl_seconds = seconds;
         self
@@ -63,13 +70,13 @@ impl FileListCache {
             .as_secs()
     }
 
-    /// 从缓存加载文件列表
+    /// 从缓存加载文件列表（返回文件列表和缓存时间）
     pub fn load(
         &self,
         job_id: &str,
         storage_type: &str,
         config_json: &str,
-    ) -> Option<HashMap<String, FileInfo>> {
+    ) -> Option<CacheResult> {
         let path = self.cache_path(job_id, storage_type);
         
         if !path.exists() {
@@ -98,21 +105,44 @@ impl FileListCache {
             return None;
         }
 
-        // 检查是否过期
+        // 检查是否过期（ttl_seconds 为 0 表示永不过期）
         let now = Self::now();
-        if now - entry.cached_at > self.ttl_seconds {
+        if self.ttl_seconds > 0 && now - entry.cached_at > self.ttl_seconds {
             info!("缓存已过期 ({}s)，清除缓存", now - entry.cached_at);
             let _ = std::fs::remove_file(&path);
             return None;
         }
 
+        let age_str = Self::format_age(now - entry.cached_at);
+
         info!(
-            "从缓存加载 {} 个文件 (缓存于 {}s 前)",
+            "从缓存加载 {} 个文件 (缓存于 {})",
             entry.files.len(),
-            now - entry.cached_at
+            age_str
         );
 
-        Some(entry.files)
+        Some(CacheResult {
+            files: entry.files,
+            cached_at: entry.cached_at,
+        })
+    }
+
+    /// 格式化缓存时间
+    pub fn format_age(age_seconds: u64) -> String {
+        if age_seconds < 60 {
+            format!("{}秒前", age_seconds)
+        } else if age_seconds < 3600 {
+            format!("{}分钟前", age_seconds / 60)
+        } else if age_seconds < 86400 {
+            format!("{}小时前", age_seconds / 3600)
+        } else {
+            format!("{}天前", age_seconds / 86400)
+        }
+    }
+
+    /// 获取当前时间戳（公开方法）
+    pub fn current_time() -> u64 {
+        Self::now()
     }
 
     /// 保存文件列表到缓存

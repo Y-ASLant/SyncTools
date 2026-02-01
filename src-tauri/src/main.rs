@@ -100,9 +100,12 @@ async fn main() {
             synctools_lib::commands::sync::get_pending_transfers,
             synctools_lib::commands::sync::get_sync_history,
             synctools_lib::commands::sync::analyze_job,
+            synctools_lib::commands::sync::clear_scan_cache,
             synctools_lib::commands::test::test_connection,
             synctools_lib::commands::log::get_log_config,
             synctools_lib::commands::log::set_log_config,
+            synctools_lib::commands::cache::get_cache_config,
+            synctools_lib::commands::cache::set_cache_config,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

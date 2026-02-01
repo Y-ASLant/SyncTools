@@ -33,6 +33,14 @@ pub struct SyncConfig {
     pub scan_config: ScanConfig,
     /// 是否自动创建目标目录
     pub auto_create_dir: bool,
+    /// 冲突解决方案（路径 -> 解决方式）
+    pub conflict_resolutions: std::collections::HashMap<String, String>,
+    /// 是否强制刷新缓存
+    pub force_refresh: bool,
+    /// 缓存目录
+    pub cache_dir: Option<std::path::PathBuf>,
+    /// 远程存储缓存 TTL（秒），本地存储不使用缓存
+    pub remote_cache_ttl: u64,
 }
 
 impl Default for SyncConfig {
@@ -46,6 +54,10 @@ impl Default for SyncConfig {
             enable_resume: true,
             scan_config: ScanConfig::default(),
             auto_create_dir: true,
+            conflict_resolutions: std::collections::HashMap::new(),
+            force_refresh: false,
+            cache_dir: None,
+            remote_cache_ttl: 1800, // 默认 30 分钟
         }
     }
 }
@@ -133,7 +145,10 @@ impl SyncEngine {
         let start_time = chrono::Utc::now().timestamp();
         let job_id = job.id.clone();
 
-        info!("开始同步任务: {} ({})", job.name, job_id);
+        info!(
+            "开始同步任务: {} ({}) - 并发数: {}, 自动创建目录: {}",
+            job.name, job_id, self.config.max_concurrent_transfers, self.config.auto_create_dir
+        );
 
         // 重置取消标志
         self.cancelled.store(false, Ordering::SeqCst);
@@ -254,15 +269,78 @@ impl SyncEngine {
 
         let scanner = FileScanner::with_config(8, self.config.scan_config.clone());
 
-        let source_tree = match scanner.scan_storage(source_storage.as_ref(), None).await {
-            Ok(t) => t,
-            Err(e) => {
-                error!("扫描源存储失败: {}", e);
-                return Ok(self.create_failed_report(
-                    &job_id,
-                    start_time,
-                    vec![format!("扫描源存储失败: {}", e)],
-                ));
+        // 初始化缓存管理器（只对远程存储使用缓存），缓存目录跟随数据存储目录
+        let cache_dir = self.config.cache_dir.clone()
+            .unwrap_or_else(|| std::path::PathBuf::from(".synctools/cache"));
+        
+        // 本地存储不使用缓存（TTL=0 表示直接扫描），远程存储使用配置的 TTL
+        let source_is_local = matches!(job.sourceConfig.typ, crate::db::StorageType::Local);
+        let dest_is_local = matches!(job.destConfig.typ, crate::db::StorageType::Local);
+        let source_ttl = if source_is_local { 0 } else { self.config.remote_cache_ttl };
+        let dest_ttl = if dest_is_local { 0 } else { self.config.remote_cache_ttl };
+        
+        let source_cache = FileListCache::new(cache_dir.clone()).with_ttl(source_ttl);
+        let dest_cache = FileListCache::new(cache_dir).with_ttl(dest_ttl);
+        let source_config_json = serde_json::to_string(&job.sourceConfig).unwrap_or_default();
+        let dest_config_json = serde_json::to_string(&job.destConfig).unwrap_or_default();
+        let force_refresh = self.config.force_refresh;
+
+        // 扫描源存储（支持缓存）
+        let source_tree = if !force_refresh {
+            if let Some(cached) = source_cache.load(&job_id, "source", &source_config_json) {
+                self.send_progress(
+                    &progress_tx,
+                    SyncProgress {
+                        jobId: job_id.clone(),
+                        status: SyncStatus::Scanning,
+                        phase: format!("从缓存加载源文件列表 ({} 个)...", cached.files.len()),
+                        currentFile: String::new(),
+                        filesScanned: cached.files.len() as u32,
+                        filesToSync: 0,
+                        filesCompleted: 0,
+                        filesSkipped: 0,
+                        filesFailed: 0,
+                        bytesTransferred: 0,
+                        bytesTotal: 0,
+                        speed: 0,
+                        eta: 0,
+                        startTime: start_time,
+                    },
+                )
+                .await;
+                cached.files
+            } else {
+                match scanner.scan_storage(source_storage.as_ref(), None).await {
+                    Ok(t) => {
+                        let _ = source_cache.save(&job_id, "source", &source_config_json, &t);
+                        t
+                    }
+                    Err(e) => {
+                        error!("扫描源存储失败: {}", e);
+                        return Ok(self.create_failed_report(
+                            &job_id,
+                            start_time,
+                            vec![format!("扫描源存储失败: {}", e)],
+                        ));
+                    }
+                }
+            }
+        } else {
+            // 强制刷新，清除缓存并重新扫描
+            source_cache.clear(&job_id);
+            match scanner.scan_storage(source_storage.as_ref(), None).await {
+                Ok(t) => {
+                    let _ = source_cache.save(&job_id, "source", &source_config_json, &t);
+                    t
+                }
+                Err(e) => {
+                    error!("扫描源存储失败: {}", e);
+                    return Ok(self.create_failed_report(
+                        &job_id,
+                        start_time,
+                        vec![format!("扫描源存储失败: {}", e)],
+                    ));
+                }
             }
         };
 
@@ -275,7 +353,7 @@ impl SyncEngine {
             SyncProgress {
                 jobId: job_id.clone(),
                 status: SyncStatus::Scanning,
-                phase: format!("正在扫描云端文件 (本地 {} 个)...", source_tree.len()),
+                phase: format!("正在扫描目标文件 (源 {} 个)...", source_tree.len()),
                 currentFile: "检查缓存...".to_string(),
                 filesScanned: source_tree.len() as u32,
                 filesToSync: 0,
@@ -291,24 +369,15 @@ impl SyncEngine {
         )
         .await;
 
-        // 尝试从缓存加载目标文件列表（仅对远程存储使用缓存）
-        let cache_dir = crate::dirs::cache_dir()
-            .map(|p| p.join("synctools").join("file_cache"))
-            .unwrap_or_else(|| std::path::PathBuf::from(".synctools/cache"));
-        let cache = FileListCache::new(cache_dir).with_ttl(300); // 5分钟缓存
-        let dest_config_json = serde_json::to_string(&job.destConfig).unwrap_or_default();
-        let is_remote_dest = matches!(job.destConfig.typ, crate::db::StorageType::S3 | crate::db::StorageType::WebDav);
-
-        let dest_tree = if is_remote_dest {
-            // 尝试从缓存加载
-            if let Some(cached) = cache.load(&job_id, "dest", &dest_config_json) {
-                debug!("使用缓存的目标文件列表 ({} 个文件)", cached.len());
+        // 扫描目标存储（支持缓存）
+        let dest_tree = if !force_refresh {
+            if let Some(cached) = dest_cache.load(&job_id, "dest", &dest_config_json) {
                 self.send_progress(
                     &progress_tx,
                     SyncProgress {
                         jobId: job_id.clone(),
                         status: SyncStatus::Scanning,
-                        phase: format!("从缓存加载云端文件列表 ({} 个)...", cached.len()),
+                        phase: format!("从缓存加载目标文件列表 ({} 个)...", cached.files.len()),
                         currentFile: String::new(),
                         filesScanned: source_tree.len() as u32,
                         filesToSync: 0,
@@ -323,16 +392,15 @@ impl SyncEngine {
                     },
                 )
                 .await;
-                cached
+                cached.files
             } else {
-                // 缓存未命中，重新扫描
                 self.send_progress(
                     &progress_tx,
                     SyncProgress {
                         jobId: job_id.clone(),
                         status: SyncStatus::Scanning,
-                        phase: format!("正在扫描云端文件 (本地 {} 个)...", source_tree.len()),
-                        currentFile: "WebDAV 响应较慢，请耐心等待".to_string(),
+                        phase: format!("正在扫描目标文件 (源 {} 个)...", source_tree.len()),
+                        currentFile: "远程存储响应较慢，请耐心等待".to_string(),
                         filesScanned: source_tree.len() as u32,
                         filesToSync: 0,
                         filesCompleted: 0,
@@ -349,8 +417,7 @@ impl SyncEngine {
 
                 match scanner.scan_storage(dest_storage.as_ref(), None).await {
                     Ok(t) => {
-                        // 保存到缓存
-                        let _ = cache.save(&job_id, "dest", &dest_config_json, &t);
+                        let _ = dest_cache.save(&job_id, "dest", &dest_config_json, &t);
                         t
                     }
                     Err(e) => {
@@ -364,9 +431,11 @@ impl SyncEngine {
                 }
             }
         } else {
-            // 本地存储不使用缓存
             match scanner.scan_storage(dest_storage.as_ref(), None).await {
-                Ok(t) => t,
+                Ok(t) => {
+                    let _ = dest_cache.save(&job_id, "dest", &dest_config_json, &t);
+                    t
+                }
                 Err(e) => {
                     error!("扫描目标存储失败: {}", e);
                     return Ok(self.create_failed_report(
@@ -584,9 +653,9 @@ impl SyncEngine {
         );
 
         // 同步完成后清除缓存（文件列表已变化）
-        if is_remote_dest && (files_copied > 0 || files_deleted > 0) {
-            cache.clear(&job_id);
-            debug!("已清除目标存储缓存");
+        if files_copied > 0 || files_deleted > 0 {
+            source_cache.clear(&job_id);
+            debug!("已清除扫描缓存");
         }
 
         Ok(SyncReport {

@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { X, Clock, CheckCircle, XCircle, AlertCircle } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
+import { formatBytes, formatTime } from "../lib/utils";
+import { useDialog } from "../hooks";
 import type { SyncHistoryEntry } from "../lib/types";
 
 interface HistoryPanelProps {
@@ -18,24 +20,13 @@ export function HistoryPanel({
 }: HistoryPanelProps) {
   const [history, setHistory] = useState<SyncHistoryEntry[]>([]);
   const [loading, setLoading] = useState(false);
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
+  const { visible, isClosing, handleClose } = useDialog(isOpen, onClose);
 
   useEffect(() => {
     if (isOpen) {
-      setVisible(true);
-      setIsClosing(false);
       loadHistory();
     }
   }, [isOpen, jobId]);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      onClose();
-    }, 100);
-  };
 
   const loadHistory = async () => {
     setLoading(true);
@@ -52,23 +43,13 @@ export function HistoryPanel({
     }
   };
 
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString("zh-CN");
-  };
-
-  const formatDuration = (start: number, end: number | null) => {
+  const formatHistoryDuration = (start: number, end: number | null) => {
     if (!end) return "-";
-    const duration = Math.floor((end - start) / 60);
-    if (duration < 60) return `${duration}分钟`;
-    return `${Math.floor(duration / 60)}小时${duration % 60}分钟`;
-  };
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+    const seconds = end - start;
+    if (seconds < 60) return `${seconds}秒`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}分${seconds % 60}秒`;
+    return `${Math.floor(minutes / 60)}时${minutes % 60}分`;
   };
 
   const getStatusIcon = (status: string) => {
@@ -114,7 +95,7 @@ export function HistoryPanel({
             </p>
           </div>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <X className="w-4 h-4 text-slate-500" />
@@ -188,7 +169,7 @@ export function HistoryPanel({
                     <div className="flex items-center gap-3">
                       <span>{formatBytes(entry.bytes_transferred)}</span>
                       <span>
-                        {formatDuration(entry.start_time, entry.end_time)}
+                        {formatHistoryDuration(entry.start_time, entry.end_time)}
                       </span>
                     </div>
                     {entry.error_message && (

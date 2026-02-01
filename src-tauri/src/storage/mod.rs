@@ -104,7 +104,7 @@ pub async fn create_storage(
                 .path
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("Local storage requires path"))?;
-            tracing::info!("创建本地存储: {}", path);
+            tracing::info!("初始化本地存储: {}", path);
             Ok(std::sync::Arc::new(LocalStorage::new(path)?) as std::sync::Arc<dyn Storage>)
         }
         crate::db::StorageType::S3 => {
@@ -124,7 +124,7 @@ pub async fn create_storage(
                 .secretKey
                 .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("S3 storage requires secretKey"))?;
-            tracing::info!("创建S3存储: bucket={}, region={}", bucket, region);
+            tracing::info!("初始化S3存储: bucket={}, region={}", bucket, region);
             Ok(std::sync::Arc::new(
                 S3Storage::new(
                     bucket,

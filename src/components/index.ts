@@ -8,6 +8,7 @@ export { TitleBar } from "./TitleBar";
 export { DiffViewDialog } from "./DiffViewDialog";
 export { MessageDialog } from "./MessageDialog";
 export { BaseDialog, DialogContent, DialogFooter } from "./BaseDialog";
+export { Switch } from "./Switch";
 export type { ToastMessage, ToastType } from "./Toast";
 export type { ConflictInfo, ConflictResolution } from "./ConflictDialog";
 export type { DiffResult, DiffAction } from "./DiffViewDialog";

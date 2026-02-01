@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { X, FileWarning, Check, Clock, HardDrive } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn, formatBytes, formatTime } from "../lib/utils";
 import { useDialog } from "../hooks";
 
 export interface ConflictInfo {
@@ -47,18 +47,6 @@ export function ConflictDialog({
   );
 
   if (!visible || conflicts.length === 0) return null;
-
-  const formatSize = (bytes: number) => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  };
-
-  const formatTime = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString("zh-CN");
-  };
 
   const getResolution = (path: string): ConflictResolution => {
     return resolutions.get(path) || defaultResolution;
@@ -212,7 +200,7 @@ export function ConflictDialog({
                     <div className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
                       <div className="flex items-center gap-2">
                         <HardDrive className="w-3.5 h-3.5" />
-                        <span>{formatSize(conflict.sourceSize)}</span>
+                        <span>{formatBytes(conflict.sourceSize)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="w-3.5 h-3.5" />
@@ -227,7 +215,7 @@ export function ConflictDialog({
                     <div className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
                       <div className="flex items-center gap-2">
                         <HardDrive className="w-3.5 h-3.5" />
-                        <span>{formatSize(conflict.destSize)}</span>
+                        <span>{formatBytes(conflict.destSize)}</span>
                       </div>
                       <div className="flex items-center gap-2">
                         <Clock className="w-3.5 h-3.5" />

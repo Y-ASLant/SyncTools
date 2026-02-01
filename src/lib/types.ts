@@ -91,3 +91,8 @@ export interface LogConfig {
   maxSizeMb: number;
   level: string;
 }
+
+// 缓存配置
+export interface CacheConfig {
+  remoteTtl: number; // 远程存储缓存 TTL（秒），本地存储不使用缓存
+}

@@ -10,10 +10,11 @@ import {
   Clock,
   StopCircle,
   Pencil,
-  Search,
   ArrowRight,
+  ArrowLeftRight,
+  RotateCcw,
 } from "lucide-react";
-import { cn } from "./lib/utils";
+import { cn, formatBytes, formatDuration, getStorageTypeLabel, getSyncModeLabel } from "./lib/utils";
 import {
   CreateJobDialog,
   SettingsDialog,
@@ -23,9 +24,10 @@ import {
   TitleBar,
   ConfirmDialog,
   DiffViewDialog,
+  ConflictDialog,
 } from "./components";
 import type { SyncProgress, SyncJob } from "./lib/types";
-import type { DiffResult } from "./components";
+import type { DiffResult, ConflictInfo, ConflictResolution } from "./components";
 
 function App() {
   const {
@@ -53,6 +55,9 @@ function App() {
   const [filterMode, setFilterMode] = useState<
     "all" | "bidirectional" | "mirror" | "backup"
   >("all");
+  // 冲突处理状态
+  const [conflicts, setConflicts] = useState<ConflictInfo[]>([]);
+  const [conflictJobId, setConflictJobId] = useState<string | null>(null);
   const { toasts, closeToast, success, error: showError, info } = useToast();
 
   // 初始化：加载任务列表和设置事件监听
@@ -192,11 +197,11 @@ function App() {
     }
   };
 
-  const handleAnalyzeJob = async (jobId: string) => {
+  const handleAnalyzeJob = async (jobId: string, forceRefresh: boolean = false) => {
     setAnalyzingJob(jobId);
     analyzeAbortRef.current = false;
     try {
-      const result = await invoke<DiffResult>("analyze_job", { jobId });
+      const result = await invoke<DiffResult>("analyze_job", { jobId, forceRefresh });
       // 如果已取消，忽略结果
       if (analyzeAbortRef.current) {
         info("已取消", "分析操作已取消");
@@ -204,6 +209,9 @@ function App() {
       }
       setDiffResult(result);
       setDiffJobId(jobId);
+      if (forceRefresh) {
+        success("刷新完成", "已重新扫描文件列表");
+      }
     } catch (err) {
       if (!analyzeAbortRef.current) {
         console.error("分析任务失败:", err);
@@ -228,7 +236,30 @@ function App() {
   };
 
   const handleSyncFromDiff = () => {
-    if (!diffJobId) return;
+    if (!diffJobId || !diffResult) return;
+    
+    // 检查是否有冲突
+    if (diffResult.conflictCount > 0) {
+      // 从 actions 中提取冲突信息
+      const conflictActions = diffResult.actions.filter(a => a.type === "conflict");
+      const conflictInfos: ConflictInfo[] = conflictActions.map(action => ({
+        path: action.path,
+        sourceSize: action.sourceExists ? action.size : 0,
+        sourceTime: Date.now() / 1000, // 后端应该返回实际时间
+        destSize: action.destExists ? action.size : 0,
+        destTime: Date.now() / 1000,
+        conflictType: "both_modified" as const,
+      }));
+      
+      // 显示冲突对话框
+      setConflicts(conflictInfos);
+      setConflictJobId(diffJobId);
+      // 先关闭 diff 对话框
+      setDiffResult(null);
+      setDiffJobId(null);
+      return;
+    }
+    
     const jobId = diffJobId;
     // 先关闭弹窗
     setDiffResult(null);
@@ -237,18 +268,31 @@ function App() {
     handleStartSync(jobId);
   };
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB", "TB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
-  };
-
-  const formatDuration = (seconds: number): string => {
-    if (seconds < 60) return `${seconds}s`;
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
-    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  // 处理冲突解决
+  const handleConflictResolve = async (resolutions: Map<string, ConflictResolution>) => {
+    if (!conflictJobId) return;
+    
+    // 将解决方案转换为后端期望的格式
+    const resolutionMap: Record<string, string> = {};
+    resolutions.forEach((value, key) => {
+      resolutionMap[key] = value;
+    });
+    
+    // 关闭冲突对话框
+    setConflicts([]);
+    const jobId = conflictJobId;
+    setConflictJobId(null);
+    
+    // 启动同步，传递冲突解决方案
+    try {
+      await invoke("start_sync", { 
+        jobId,
+        conflictResolutions: resolutionMap 
+      });
+    } catch (err) {
+      console.error("同步失败:", err);
+      showError("同步失败", String(err));
+    }
   };
 
   return (
@@ -386,27 +430,19 @@ function App() {
                         <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 dark:text-slate-500">
                           <span className="flex items-center gap-1">
                             <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                            {job.sourceConfig.type === "local"
-                              ? "本地"
-                              : job.sourceConfig.type === "s3"
-                                ? "S3"
-                                : "WebDAV"}
+                            {getStorageTypeLabel(job.sourceConfig.type)}
                           </span>
-                          <ArrowRight className="w-3 h-3 text-slate-400" />
+                          {job.syncMode === "bidirectional" ? (
+                            <ArrowLeftRight className="w-3 h-3 text-slate-400" />
+                          ) : (
+                            <ArrowRight className="w-3 h-3 text-slate-400" />
+                          )}
                           <span className="flex items-center gap-1">
-                            {job.destConfig.type === "local"
-                              ? "本地"
-                              : job.destConfig.type === "s3"
-                                ? "S3"
-                                : "WebDAV"}
+                            {getStorageTypeLabel(job.destConfig.type)}
                             <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
                           </span>
                           <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
-                            {job.syncMode === "bidirectional"
-                              ? "双向"
-                              : job.syncMode === "mirror"
-                                ? "镜像"
-                                : "备份"}
+                            {getSyncModeLabel(job.syncMode)}
                           </span>
                         </div>
                       </div>
@@ -453,23 +489,23 @@ function App() {
                                 </>
                               ) : (
                                 <>
-                                  <Search className="w-3 h-3" />
+                                  <Play className="w-3 h-3" />
                                   分析
                                 </>
                               )}
                             </button>
                             <button
-                              onClick={() => handleStartSync(job.id)}
-                              disabled={!job.enabled}
+                              onClick={() => handleAnalyzeJob(job.id, true)}
+                              disabled={!job.enabled || analyzingJob !== null}
                               className={cn(
-                                "flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors btn-press",
-                                !job.enabled
-                                  ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
-                                  : "bg-blue-500 hover:bg-blue-600 text-white",
+                                "p-1 rounded transition-colors",
+                                !job.enabled || analyzingJob !== null
+                                  ? "text-slate-300 dark:text-slate-700 cursor-not-allowed"
+                                  : "text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-slate-800",
                               )}
+                              title="强制刷新（重新扫描文件）"
                             >
-                              <Play className="w-3 h-3" />
-                              同步
+                              <RotateCcw className="w-3.5 h-3.5" />
                             </button>
                           </>
                         )}
@@ -560,6 +596,12 @@ function App() {
                           <RefreshCw className="w-3 h-3" />
                           <span>
                             完成，共 {jobProgress.filesCompleted} 个文件
+                            {jobProgress.startTime > 0 && (() => {
+                              const duration = Math.floor(Date.now() / 1000) - jobProgress.startTime;
+                              if (duration < 60) return `，用时 ${duration}秒`;
+                              if (duration < 3600) return `，用时 ${Math.floor(duration / 60)}分${duration % 60}秒`;
+                              return `，用时 ${Math.floor(duration / 3600)}时${Math.floor((duration % 3600) / 60)}分`;
+                            })()}
                           </span>
                         </div>
                       </div>
@@ -627,6 +669,17 @@ function App() {
         }}
         diffResult={diffResult}
         onSync={handleSyncFromDiff}
+      />
+
+      {/* 冲突处理对话框 */}
+      <ConflictDialog
+        isOpen={conflicts.length > 0}
+        onClose={() => {
+          setConflicts([]);
+          setConflictJobId(null);
+        }}
+        conflicts={conflicts}
+        onResolve={handleConflictResolve}
       />
 
       {/* Toast 通知 */}

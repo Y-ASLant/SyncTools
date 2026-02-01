@@ -5,13 +5,12 @@ import {
   Cloud,
   Server,
   Check,
-  X as XIcon,
   Loader2,
   FolderOpen,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import { cn } from "../lib/utils";
+import { cn, getSyncModeLabel, getStorageTypeLabel } from "../lib/utils";
 import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
 import type {
@@ -33,15 +32,26 @@ interface FormData {
   sourceType: StorageType;
   destType: StorageType;
   syncMode: SyncMode;
-  s3Bucket: string;
-  s3Region: string;
-  s3AccessKey: string;
-  s3SecretKey: string;
-  s3Endpoint: string;
-  webdavEndpoint: string;
-  webdavUsername: string;
-  webdavPassword: string;
-  localPath: string;
+  // 源存储配置
+  sourceLocalPath: string;
+  sourceS3Bucket: string;
+  sourceS3Region: string;
+  sourceS3AccessKey: string;
+  sourceS3SecretKey: string;
+  sourceS3Endpoint: string;
+  sourceWebdavEndpoint: string;
+  sourceWebdavUsername: string;
+  sourceWebdavPassword: string;
+  // 目标存储配置
+  destLocalPath: string;
+  destS3Bucket: string;
+  destS3Region: string;
+  destS3AccessKey: string;
+  destS3SecretKey: string;
+  destS3Endpoint: string;
+  destWebdavEndpoint: string;
+  destWebdavUsername: string;
+  destWebdavPassword: string;
 }
 
 const STORAGE_ICONS: Record<StorageType, React.ReactNode> = {
@@ -62,15 +72,26 @@ export function CreateJobDialog({
     sourceType: "local",
     destType: "s3",
     syncMode: "backup",
-    s3Bucket: "",
-    s3Region: "us-east-1",
-    s3AccessKey: "",
-    s3SecretKey: "",
-    s3Endpoint: "",
-    webdavEndpoint: "",
-    webdavUsername: "",
-    webdavPassword: "",
-    localPath: "",
+    // 源存储配置
+    sourceLocalPath: "",
+    sourceS3Bucket: "",
+    sourceS3Region: "us-east-1",
+    sourceS3AccessKey: "",
+    sourceS3SecretKey: "",
+    sourceS3Endpoint: "",
+    sourceWebdavEndpoint: "",
+    sourceWebdavUsername: "",
+    sourceWebdavPassword: "",
+    // 目标存储配置
+    destLocalPath: "",
+    destS3Bucket: "",
+    destS3Region: "us-east-1",
+    destS3AccessKey: "",
+    destS3SecretKey: "",
+    destS3Endpoint: "",
+    destWebdavEndpoint: "",
+    destWebdavUsername: "",
+    destWebdavPassword: "",
   });
 
   const [isCreating, setIsCreating] = useState(false);
@@ -108,15 +129,24 @@ export function CreateJobDialog({
       sourceType: "local",
       destType: "s3",
       syncMode: "backup",
-      s3Bucket: "",
-      s3Region: "us-east-1",
-      s3AccessKey: "",
-      s3SecretKey: "",
-      s3Endpoint: "",
-      webdavEndpoint: "",
-      webdavUsername: "",
-      webdavPassword: "",
-      localPath: "",
+      sourceLocalPath: "",
+      sourceS3Bucket: "",
+      sourceS3Region: "us-east-1",
+      sourceS3AccessKey: "",
+      sourceS3SecretKey: "",
+      sourceS3Endpoint: "",
+      sourceWebdavEndpoint: "",
+      sourceWebdavUsername: "",
+      sourceWebdavPassword: "",
+      destLocalPath: "",
+      destS3Bucket: "",
+      destS3Region: "us-east-1",
+      destS3AccessKey: "",
+      destS3SecretKey: "",
+      destS3Endpoint: "",
+      destWebdavEndpoint: "",
+      destWebdavUsername: "",
+      destWebdavPassword: "",
     });
     setTestResults({});
     onClose();
@@ -136,27 +166,26 @@ export function CreateJobDialog({
         sourceType,
         destType,
         syncMode: editJob.syncMode as SyncMode,
-        s3Bucket:
-          editJob.sourceConfig.bucket || editJob.destConfig.bucket || "",
-        s3Region:
-          editJob.sourceConfig.region ||
-          editJob.destConfig.region ||
-          "us-east-1",
-        s3AccessKey:
-          editJob.sourceConfig.accessKey || editJob.destConfig.accessKey || "",
-        s3SecretKey:
-          editJob.sourceConfig.secretKey || editJob.destConfig.secretKey || "",
-        s3Endpoint:
-          editJob.sourceConfig.endpoint || editJob.destConfig.endpoint || "",
-        webdavEndpoint:
-          editJob.sourceConfig.webdavEndpoint ||
-          editJob.destConfig.webdavEndpoint ||
-          "",
-        webdavUsername:
-          editJob.sourceConfig.username || editJob.destConfig.username || "",
-        webdavPassword:
-          editJob.sourceConfig.password || editJob.destConfig.password || "",
-        localPath: editJob.sourceConfig.path || editJob.destConfig.path || "",
+        // 源存储配置
+        sourceLocalPath: editJob.sourceConfig.path || "",
+        sourceS3Bucket: editJob.sourceConfig.bucket || "",
+        sourceS3Region: editJob.sourceConfig.region || "us-east-1",
+        sourceS3AccessKey: editJob.sourceConfig.accessKey || "",
+        sourceS3SecretKey: editJob.sourceConfig.secretKey || "",
+        sourceS3Endpoint: editJob.sourceConfig.endpoint || "",
+        sourceWebdavEndpoint: editJob.sourceConfig.webdavEndpoint || "",
+        sourceWebdavUsername: editJob.sourceConfig.username || "",
+        sourceWebdavPassword: editJob.sourceConfig.password || "",
+        // 目标存储配置
+        destLocalPath: editJob.destConfig.path || "",
+        destS3Bucket: editJob.destConfig.bucket || "",
+        destS3Region: editJob.destConfig.region || "us-east-1",
+        destS3AccessKey: editJob.destConfig.accessKey || "",
+        destS3SecretKey: editJob.destConfig.secretKey || "",
+        destS3Endpoint: editJob.destConfig.endpoint || "",
+        destWebdavEndpoint: editJob.destConfig.webdavEndpoint || "",
+        destWebdavUsername: editJob.destConfig.username || "",
+        destWebdavPassword: editJob.destConfig.password || "",
       });
       setStep(3); // 编辑模式直接跳到配置页
     }
@@ -167,6 +196,7 @@ export function CreateJobDialog({
   const testConnection = async (storage: "source" | "dest") => {
     const type = storage === "source" ? formData.sourceType : formData.destType;
     const key = `${storage}-${type}`;
+    const isSource = storage === "source";
 
     setTesting((prev) => ({ ...prev, [key]: true }));
     setTestResults((prev) => ({
@@ -177,15 +207,15 @@ export function CreateJobDialog({
     try {
       const result = await invoke<TestConnectionResult>("test_connection", {
         typ: type,
-        path: formData.localPath || null,
-        bucket: formData.s3Bucket || null,
-        region: formData.s3Region || null,
-        accessKey: formData.s3AccessKey || null,
-        secretKey: formData.s3SecretKey || null,
-        endpoint: formData.s3Endpoint || null,
-        webdavEndpoint: formData.webdavEndpoint || null,
-        username: formData.webdavUsername || null,
-        password: formData.webdavPassword || null,
+        path: isSource ? formData.sourceLocalPath : formData.destLocalPath || null,
+        bucket: isSource ? formData.sourceS3Bucket : formData.destS3Bucket || null,
+        region: isSource ? formData.sourceS3Region : formData.destS3Region || null,
+        accessKey: isSource ? formData.sourceS3AccessKey : formData.destS3AccessKey || null,
+        secretKey: isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey || null,
+        endpoint: isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint || null,
+        webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint || null,
+        username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername || null,
+        password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword || null,
       });
       setTestResults((prev) => ({ ...prev, [key]: result }));
     } catch (error) {
@@ -210,34 +240,30 @@ export function CreateJobDialog({
 
     // 验证源存储配置
     if (formData.sourceType === "local") {
-      if (!formData.localPath.trim()) {
-        return "请输入本地路径";
-      }
+      if (!formData.sourceLocalPath.trim()) return "请输入源本地路径";
     } else if (formData.sourceType === "s3") {
-      if (!formData.s3Bucket.trim()) return "请输入 S3 Bucket 名称";
-      if (!formData.s3Region.trim()) return "请输入 S3 Region";
-      if (!formData.s3AccessKey.trim()) return "请输入 Access Key ID";
-      if (!formData.s3SecretKey.trim()) return "请输入 Secret Access Key";
+      if (!formData.sourceS3Bucket.trim()) return "请输入源 S3 Bucket";
+      if (!formData.sourceS3Region.trim()) return "请输入源 S3 Region";
+      if (!formData.sourceS3AccessKey.trim()) return "请输入源 Access Key";
+      if (!formData.sourceS3SecretKey.trim()) return "请输入源 Secret Key";
     } else if (formData.sourceType === "webdav") {
-      if (!formData.webdavEndpoint.trim()) return "请输入 WebDAV 地址";
-      if (!formData.webdavUsername.trim()) return "请输入 WebDAV 用户名";
-      if (!formData.webdavPassword.trim()) return "请输入 WebDAV 密码";
+      if (!formData.sourceWebdavEndpoint.trim()) return "请输入源 WebDAV 地址";
+      if (!formData.sourceWebdavUsername.trim()) return "请输入源 WebDAV 用户名";
+      if (!formData.sourceWebdavPassword.trim()) return "请输入源 WebDAV 密码";
     }
 
     // 验证目标存储配置
     if (formData.destType === "local") {
-      if (!formData.localPath.trim()) {
-        return "请输入本地路径";
-      }
+      if (!formData.destLocalPath.trim()) return "请输入目标本地路径";
     } else if (formData.destType === "s3") {
-      if (!formData.s3Bucket.trim()) return "请输入 S3 Bucket 名称";
-      if (!formData.s3Region.trim()) return "请输入 S3 Region";
-      if (!formData.s3AccessKey.trim()) return "请输入 Access Key ID";
-      if (!formData.s3SecretKey.trim()) return "请输入 Secret Access Key";
+      if (!formData.destS3Bucket.trim()) return "请输入目标 S3 Bucket";
+      if (!formData.destS3Region.trim()) return "请输入目标 S3 Region";
+      if (!formData.destS3AccessKey.trim()) return "请输入目标 Access Key";
+      if (!formData.destS3SecretKey.trim()) return "请输入目标 Secret Key";
     } else if (formData.destType === "webdav") {
-      if (!formData.webdavEndpoint.trim()) return "请输入 WebDAV 地址";
-      if (!formData.webdavUsername.trim()) return "请输入 WebDAV 用户名";
-      if (!formData.webdavPassword.trim()) return "请输入 WebDAV 密码";
+      if (!formData.destWebdavEndpoint.trim()) return "请输入目标 WebDAV 地址";
+      if (!formData.destWebdavUsername.trim()) return "请输入目标 WebDAV 用户名";
+      if (!formData.destWebdavPassword.trim()) return "请输入目标 WebDAV 密码";
     }
 
     return null;
@@ -253,25 +279,25 @@ export function CreateJobDialog({
 
     setIsCreating(true);
     try {
-      const buildStorageConfig = (type: StorageType) => {
+      const buildStorageConfig = (type: StorageType, isSource: boolean) => {
         switch (type) {
           case "local":
-            return { type: "local", path: formData.localPath };
+            return { type: "local", path: isSource ? formData.sourceLocalPath : formData.destLocalPath };
           case "s3":
             return {
               type: "s3",
-              bucket: formData.s3Bucket,
-              region: formData.s3Region,
-              accessKey: formData.s3AccessKey,
-              secretKey: formData.s3SecretKey,
-              endpoint: formData.s3Endpoint || undefined,
+              bucket: isSource ? formData.sourceS3Bucket : formData.destS3Bucket,
+              region: isSource ? formData.sourceS3Region : formData.destS3Region,
+              accessKey: isSource ? formData.sourceS3AccessKey : formData.destS3AccessKey,
+              secretKey: isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey,
+              endpoint: (isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint) || undefined,
             };
           case "webdav":
             return {
               type: "webdav",
-              webdavEndpoint: formData.webdavEndpoint,
-              username: formData.webdavUsername,
-              password: formData.webdavPassword,
+              webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint,
+              username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername,
+              password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword,
             };
         }
       };
@@ -281,16 +307,16 @@ export function CreateJobDialog({
         await invoke("update_job", {
           id: editJob.id,
           name: formData.name,
-          sourceConfig: buildStorageConfig(formData.sourceType),
-          destConfig: buildStorageConfig(formData.destType),
+          sourceConfig: buildStorageConfig(formData.sourceType, true),
+          destConfig: buildStorageConfig(formData.destType, false),
           syncMode: formData.syncMode,
         });
       } else {
         // 创建模式：新建任务
         await invoke("create_job", {
           name: formData.name,
-          sourceConfig: buildStorageConfig(formData.sourceType),
-          destConfig: buildStorageConfig(formData.destType),
+          sourceConfig: buildStorageConfig(formData.sourceType, true),
+          destConfig: buildStorageConfig(formData.destType, false),
           syncMode: formData.syncMode,
           schedule: null,
         });
@@ -342,18 +368,14 @@ export function CreateJobDialog({
               )}
             >
               <div className="text-sm font-medium text-slate-900 dark:text-white mb-0.5">
-                {mode === "bidirectional"
-                  ? "双向同步"
-                  : mode === "mirror"
-                    ? "镜像同步"
-                    : "备份"}
+                {getSyncModeLabel(mode)}同步
               </div>
               <div className="text-xs text-slate-500 dark:text-slate-400">
                 {mode === "bidirectional"
-                  ? "两边修改都会同步"
+                  ? "源 ↔ 目标，双向同步"
                   : mode === "mirror"
-                    ? "目标完全复制源"
-                    : "只从源同步到目标"}
+                    ? "源 → 目标，删除多余"
+                    : "源 → 目标，仅新增"}
               </div>
             </button>
           ))}
@@ -382,7 +404,7 @@ export function CreateJobDialog({
             >
               {STORAGE_ICONS[type]}
               <span className="text-sm font-medium text-slate-900 dark:text-white">
-                {type === "local" ? "本地" : type === "s3" ? "S3" : "WebDAV"}
+                {getStorageTypeLabel(type)}
               </span>
             </button>
           ))}
@@ -407,7 +429,7 @@ export function CreateJobDialog({
             >
               {STORAGE_ICONS[type]}
               <span className="text-sm font-medium text-slate-900 dark:text-white">
-                {type === "local" ? "本地" : type === "s3" ? "S3" : "WebDAV"}
+                {getStorageTypeLabel(type)}
               </span>
             </button>
           ))}
@@ -450,7 +472,7 @@ export function CreateJobDialog({
             {result.success ? (
               <Check className="w-3 h-3" />
             ) : (
-              <XIcon className="w-3 h-3" />
+              <X className="w-3 h-3" />
             )}
             {result.message}
           </>
@@ -483,17 +505,17 @@ export function CreateJobDialog({
         </div>
       )}
 
-      {(formData.sourceType === "local" || formData.destType === "local") && (
-        <div className="p-3 border border-slate-200 dark:border-slate-700 rounded">
-          <h4 className="text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
-            本地路径
+      {formData.sourceType === "local" && (
+        <div className="p-3 border border-blue-200 dark:border-blue-700 rounded bg-blue-50/50 dark:bg-blue-900/10">
+          <h4 className="text-xs font-medium text-blue-700 dark:text-blue-300 mb-2">
+            源本地路径
           </h4>
           <div className="flex gap-2">
             <input
               type="text"
-              value={formData.localPath}
+              value={formData.sourceLocalPath}
               onChange={(e) =>
-                setFormData({ ...formData, localPath: e.target.value })
+                setFormData({ ...formData, sourceLocalPath: e.target.value })
               }
               placeholder="C:\Users\YourName\Documents"
               className="flex-1 px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
@@ -505,10 +527,10 @@ export function CreateJobDialog({
                   const selected = await open({
                     directory: true,
                     multiple: false,
-                    title: "选择文件夹",
+                    title: "选择源文件夹",
                   });
                   if (selected && typeof selected === "string") {
-                    setFormData({ ...formData, localPath: selected });
+                    setFormData({ ...formData, sourceLocalPath: selected });
                   }
                 } catch (err) {
                   console.error("选择文件夹失败:", err);
@@ -520,62 +542,99 @@ export function CreateJobDialog({
               <FolderOpen className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             </button>
           </div>
-          <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400">
-            点击右侧按钮浏览文件夹，或直接输入路径
-          </p>
+        </div>
+      )}
+      {formData.destType === "local" && (
+        <div className="p-3 border border-green-200 dark:border-green-700 rounded bg-green-50/50 dark:bg-green-900/10">
+          <h4 className="text-xs font-medium text-green-700 dark:text-green-300 mb-2">
+            目标本地路径
+          </h4>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={formData.destLocalPath}
+              onChange={(e) =>
+                setFormData({ ...formData, destLocalPath: e.target.value })
+              }
+              placeholder="D:\Backup"
+              className="flex-1 px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
+            />
+            <button
+              type="button"
+              onClick={async () => {
+                try {
+                  const selected = await open({
+                    directory: true,
+                    multiple: false,
+                    title: "选择目标文件夹",
+                  });
+                  if (selected && typeof selected === "string") {
+                    setFormData({ ...formData, destLocalPath: selected });
+                  }
+                } catch (err) {
+                  console.error("选择文件夹失败:", err);
+                }
+              }}
+              className="px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-slate-50 dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 transition-colors"
+              title="选择文件夹"
+            >
+              <FolderOpen className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+            </button>
+          </div>
         </div>
       )}
     </div>
   );
 
-  const renderStorageConfig = (_side: "source" | "dest", type: StorageType) => {
+  const renderStorageConfig = (side: "source" | "dest", type: StorageType) => {
     const inputClass =
       "w-full px-2 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none";
+    const isSource = side === "source";
 
     if (type === "s3") {
       return (
         <div className="space-y-2">
           <input
             type="text"
-            value={formData.s3Bucket}
+            value={isSource ? formData.sourceS3Bucket : formData.destS3Bucket}
             onChange={(e) =>
-              setFormData({ ...formData, s3Bucket: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceS3Bucket" : "destS3Bucket"]: e.target.value })
             }
             placeholder="Bucket 名称"
             className={inputClass}
           />
           <input
             type="text"
-            value={formData.s3Region}
+            value={isSource ? formData.sourceS3Region : formData.destS3Region}
             onChange={(e) =>
-              setFormData({ ...formData, s3Region: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceS3Region" : "destS3Region"]: e.target.value })
             }
             placeholder="Region (如: us-east-1)"
             className={inputClass}
           />
           <input
             type="text"
-            value={formData.s3AccessKey}
+            value={isSource ? formData.sourceS3AccessKey : formData.destS3AccessKey}
             onChange={(e) =>
-              setFormData({ ...formData, s3AccessKey: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceS3AccessKey" : "destS3AccessKey"]: e.target.value })
             }
             placeholder="Access Key ID"
             className={inputClass}
           />
           <input
             type="password"
-            value={formData.s3SecretKey}
+            value={isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey}
             onChange={(e) =>
-              setFormData({ ...formData, s3SecretKey: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceS3SecretKey" : "destS3SecretKey"]: e.target.value })
             }
             placeholder="Secret Access Key"
             className={inputClass}
           />
           <input
             type="text"
-            value={formData.s3Endpoint}
+            value={isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint}
             onChange={(e) =>
-              setFormData({ ...formData, s3Endpoint: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceS3Endpoint" : "destS3Endpoint"]: e.target.value })
             }
             placeholder="Endpoint (可选，如 MinIO)"
             className={inputClass}
@@ -589,27 +648,27 @@ export function CreateJobDialog({
         <div className="space-y-2">
           <input
             type="text"
-            value={formData.webdavEndpoint}
+            value={isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint}
             onChange={(e) =>
-              setFormData({ ...formData, webdavEndpoint: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceWebdavEndpoint" : "destWebdavEndpoint"]: e.target.value })
             }
             placeholder="https://dav.example.com"
             className={inputClass}
           />
           <input
             type="text"
-            value={formData.webdavUsername}
+            value={isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername}
             onChange={(e) =>
-              setFormData({ ...formData, webdavUsername: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceWebdavUsername" : "destWebdavUsername"]: e.target.value })
             }
             placeholder="用户名"
             className={inputClass}
           />
           <input
             type="password"
-            value={formData.webdavPassword}
+            value={isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword}
             onChange={(e) =>
-              setFormData({ ...formData, webdavPassword: e.target.value })
+              setFormData({ ...formData, [isSource ? "sourceWebdavPassword" : "destWebdavPassword"]: e.target.value })
             }
             placeholder="密码"
             className={inputClass}
@@ -717,11 +776,7 @@ export function CreateJobDialog({
                       )}
                     >
                       <div className="text-xs font-medium text-slate-900 dark:text-white">
-                        {mode === "bidirectional"
-                          ? "双向同步"
-                          : mode === "mirror"
-                            ? "镜像同步"
-                            : "备份"}
+                        {getSyncModeLabel(mode)}
                       </div>
                     </button>
                   ))}

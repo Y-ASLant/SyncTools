@@ -11,7 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { cn } from "../lib/utils";
+import { cn, formatBytes } from "../lib/utils";
 import { useDialog } from "../hooks";
 
 export interface DiffAction {
@@ -34,6 +34,10 @@ export interface DiffResult {
   skipCount: number;
   conflictCount: number;
   totalBytes: number;
+  /** 源缓存时间（Unix时间戳，0表示未使用缓存） */
+  sourceCachedAt: number;
+  /** 目标缓存时间（Unix时间戳，0表示未使用缓存） */
+  destCachedAt: number;
 }
 
 interface DiffViewDialogProps {
@@ -95,13 +99,19 @@ export function DiffViewDialog({
 
   if (!visible || !diffResult) return null;
 
-  const formatBytes = (bytes: number): string => {
-    if (bytes === 0) return "0 B";
-    const k = 1024;
-    const sizes = ["B", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  // 格式化缓存时间
+  const formatCacheAge = (cachedAt: number): string | null => {
+    if (!cachedAt) return null;
+    const now = Math.floor(Date.now() / 1000);
+    const age = now - cachedAt;
+    if (age < 60) return `${age}秒前`;
+    if (age < 3600) return `${Math.floor(age / 60)}分钟前`;
+    if (age < 86400) return `${Math.floor(age / 3600)}小时前`;
+    return `${Math.floor(age / 86400)}天前`;
   };
+
+  const sourceCacheAge = formatCacheAge(diffResult.sourceCachedAt);
+  const destCacheAge = formatCacheAge(diffResult.destCachedAt);
 
   const getActionIcon = (action: DiffAction) => {
     switch (action.type) {
@@ -190,6 +200,11 @@ export function DiffViewDialog({
             <span className="text-xs text-slate-500 flex-shrink-0">
               ({diffResult.sourceFiles} 文件)
             </span>
+            {sourceCacheAge && (
+              <span className="text-xs text-amber-500 flex-shrink-0" title="缓存数据，点击刷新按钮获取最新">
+                · 缓存 {sourceCacheAge}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2 min-w-0">
             <Folder className="w-4 h-4 text-green-500 flex-shrink-0" />
@@ -202,6 +217,11 @@ export function DiffViewDialog({
             <span className="text-xs text-slate-500 flex-shrink-0">
               ({diffResult.destFiles} 文件)
             </span>
+            {destCacheAge && (
+              <span className="text-xs text-amber-500 flex-shrink-0" title="缓存数据，点击刷新按钮获取最新">
+                · 缓存 {destCacheAge}
+              </span>
+            )}
           </div>
         </div>
 

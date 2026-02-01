@@ -5,6 +5,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 pub mod commands;
+pub mod config;
 pub mod core;
 pub mod db;
 pub mod logging;
