@@ -698,6 +698,35 @@ export function CreateJobDialog({
                   className="w-full px-3 py-1.5 rounded border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-800 text-sm text-slate-900 dark:text-white focus:ring-1 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                 />
               </div>
+              {/* 同步模式 */}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 dark:text-slate-300 mb-2">
+                  同步模式
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  {(["bidirectional", "mirror", "backup"] as SyncMode[]).map((mode) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      onClick={() => setFormData({ ...formData, syncMode: mode })}
+                      className={cn(
+                        "p-2.5 rounded border text-left transition-all",
+                        formData.syncMode === mode
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600",
+                      )}
+                    >
+                      <div className="text-xs font-medium text-slate-900 dark:text-white">
+                        {mode === "bidirectional"
+                          ? "双向同步"
+                          : mode === "mirror"
+                            ? "镜像同步"
+                            : "备份"}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
               {/* 存储配置 */}
               {renderStep3()}
             </div>
