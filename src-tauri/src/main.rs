@@ -3,74 +3,61 @@
 
 use synctools_lib::logging::{get_log_dir, LogConfig, SizeRotatingWriter};
 use synctools_lib::AppState;
+use tauri::{
+    menu::{Menu, MenuItem},
+    tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Listener, Manager, WindowEvent,
+};
 use tracing_subscriber::prelude::*;
+
+/// 显示主窗口
+fn show_main_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
 
 /// 初始化日志系统
 fn init_logging() {
     let log_dir = get_log_dir();
     let _ = std::fs::create_dir_all(&log_dir);
-    
     let config = LogConfig::load(&log_dir);
-    
+
     if !config.enabled {
-        // 日志已禁用，只初始化一个空的 subscriber
-        let subscriber = tracing_subscriber::registry();
-        let _ = tracing::subscriber::set_global_default(subscriber);
+        let _ = tracing::subscriber::set_global_default(tracing_subscriber::registry());
         return;
     }
-    
-    // 创建日志级别过滤器
-    let level = config.tracing_level();
+
     let env_filter = tracing_subscriber::EnvFilter::from_default_env()
-        .add_directive(level.into())
-        .add_directive("tao=error".parse().unwrap()) // 隐藏 tao 的警告
+        .add_directive(config.tracing_level().into())
+        .add_directive("tao=error".parse().unwrap())
         .add_directive("hyper=warn".parse().unwrap())
         .add_directive("reqwest=warn".parse().unwrap());
-    
-    // 创建文件日志写入器
-    if let Ok(file_writer) = SizeRotatingWriter::new(&log_dir, config.max_size_mb) {
-        // 文件日志层 - 始终输出到文件
-        let file_layer = tracing_subscriber::fmt::layer()
-            .with_writer(file_writer)
-            .with_ansi(false)
-            .with_target(false)
-            .with_thread_ids(false)
-            .with_thread_names(false);
-        
-        // 在 debug 模式下也输出到控制台
+
+    let Ok(file_writer) = SizeRotatingWriter::new(&log_dir, config.max_size_mb) else {
         #[cfg(debug_assertions)]
-        {
-            let console_layer = tracing_subscriber::fmt::layer()
-                .with_target(false)
-                .with_thread_ids(false)
-                .with_thread_names(false);
-            
-            let subscriber = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(file_layer)
-                .with(console_layer);
-            
-            let _ = tracing::subscriber::set_global_default(subscriber);
-        }
-        
-        // 在 release 模式下只输出到文件
-        #[cfg(not(debug_assertions))]
-        {
-            let subscriber = tracing_subscriber::registry()
-                .with(env_filter)
-                .with(file_layer);
-            
-            let _ = tracing::subscriber::set_global_default(subscriber);
-        }
-    } else {
-        // 文件日志创建失败，回退到控制台
-        #[cfg(debug_assertions)]
-        {
-            tracing_subscriber::fmt()
-                .with_env_filter(env_filter)
-                .init();
-        }
-    }
+        tracing_subscriber::fmt().with_env_filter(env_filter).init();
+        return;
+    };
+
+    let file_layer = tracing_subscriber::fmt::layer()
+        .with_writer(file_writer)
+        .with_ansi(false)
+        .with_target(false)
+        .with_thread_ids(false)
+        .with_thread_names(false);
+
+    #[cfg(debug_assertions)]
+    let subscriber = tracing_subscriber::registry()
+        .with(env_filter)
+        .with(file_layer)
+        .with(tracing_subscriber::fmt::layer().with_target(false).with_thread_ids(false).with_thread_names(false));
+
+    #[cfg(not(debug_assertions))]
+    let subscriber = tracing_subscriber::registry().with(env_filter).with(file_layer);
+
+    let _ = tracing::subscriber::set_global_default(subscriber);
 }
 
 #[tokio::main]
@@ -86,6 +73,50 @@ async fn main() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
+        .setup(|app| {
+            // 创建托盘菜单
+            let show_item = MenuItem::with_id(app, "show", "显示主界面", true, None::<&str>)?;
+            let quit_item = MenuItem::with_id(app, "quit", "退出", true, None::<&str>)?;
+            let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+            // 创建系统托盘
+            let _tray = TrayIconBuilder::new()
+                .icon(app.default_window_icon().unwrap().clone())
+                .menu(&menu)
+                .tooltip("SyncTools - 文件同步工具")
+                .show_menu_on_left_click(false)
+                .on_menu_event(|app, event| match event.id.as_ref() {
+                    "show" => show_main_window(app),
+                    "quit" => app.exit(0),
+                    _ => {}
+                })
+                .on_tray_icon_event(|tray, event| {
+                    if matches!(event, TrayIconEvent::Click {
+                        button: MouseButton::Left,
+                        button_state: MouseButtonState::Up, ..
+                    }) {
+                        show_main_window(tray.app_handle());
+                    }
+                })
+                .build(app)?;
+
+            // 监听前端 ready 事件后显示窗口
+            let app_handle = app.handle().clone();
+            app.listen("frontend-ready", move |_| {
+                show_main_window(&app_handle);
+            });
+
+            Ok(())
+        })
+        .on_window_event(|window, event| {
+            // 主窗口关闭时隐藏到托盘
+            if let WindowEvent::CloseRequested { api, .. } = event {
+                if window.label() == "main" {
+                    let _ = window.hide();
+                    api.prevent_close();
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             synctools_lib::commands::job::get_jobs,
             synctools_lib::commands::job::create_job,

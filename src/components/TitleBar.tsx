@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
   Minus,
@@ -18,7 +18,16 @@ export function TitleBar({
   onOpenSettings,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [closeHover, setCloseHover] = useState(false);
   const appWindow = getCurrentWindow();
+
+  // 窗口恢复显示时重置 hover 状态
+  useEffect(() => {
+    const unlisten = appWindow.onFocusChanged(({ payload: focused }) => {
+      if (focused) setCloseHover(false);
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, [appWindow]);
 
   const handleMinimize = () => appWindow.minimize();
 
@@ -33,7 +42,10 @@ export function TitleBar({
     }
   };
 
-  const handleClose = () => appWindow.close();
+  const handleClose = () => {
+    setCloseHover(false); // 先重置状态再关闭
+    appWindow.close();
+  };
 
   return (
     <div
@@ -91,10 +103,14 @@ export function TitleBar({
         </button>
         <button
           onClick={handleClose}
-          className="w-7 h-7 flex items-center justify-center rounded hover:bg-red-500 transition-colors group"
+          onMouseEnter={() => setCloseHover(true)}
+          onMouseLeave={() => setCloseHover(false)}
+          className={`w-7 h-7 flex items-center justify-center rounded transition-colors ${
+            closeHover ? "bg-red-500" : ""
+          }`}
           title="关闭"
         >
-          <X className="w-4 h-4 text-slate-600 dark:text-slate-400 group-hover:text-white" />
+          <X className={`w-4 h-4 ${closeHover ? "text-white" : "text-slate-600 dark:text-slate-400"}`} />
         </button>
       </div>
     </div>
