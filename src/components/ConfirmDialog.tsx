@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
 import { AlertTriangle } from "lucide-react";
+import { useDialog } from "../hooks";
 
 interface ConfirmDialogProps {
   isOpen: boolean;
@@ -22,32 +22,20 @@ export function ConfirmDialog({
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      setVisible(true);
-      setIsClosing(false);
-    }
-  }, [isOpen]);
-
-  const handleClose = (callback: () => void) => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      callback();
-    }, 100);
-  };
+  const { visible, isClosing, handleClose } = useDialog(isOpen, onCancel);
 
   if (!visible) return null;
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 ${isClosing ? "dialog-overlay-out" : "dialog-overlay"}`}
+      className={`fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 ${
+        isClosing ? "dialog-overlay-out" : "dialog-overlay"
+      }`}
     >
       <div
-        className={`w-full max-w-sm bg-white dark:bg-slate-800 rounded shadow-xl ${isClosing ? "dialog-content-out" : "dialog-content"}`}
+        className={`w-full max-w-sm bg-white dark:bg-slate-800 rounded shadow-xl ${
+          isClosing ? "dialog-content-out" : "dialog-content"
+        }`}
       >
         <div className="p-4">
           <div className="flex items-start gap-3">

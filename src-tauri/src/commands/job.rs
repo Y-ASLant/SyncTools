@@ -96,25 +96,6 @@ pub async fn delete_job(id: String, state: State<'_, AppState>) -> Result<(), St
         .map_err(|e| e.to_string())
 }
 
-/// 启用/禁用任务
-#[tauri::command]
-pub async fn toggle_job(
-    id: String,
-    enabled: bool,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    let mut job = SyncJob::load(&state.db, &id)
-        .await
-        .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("Job not found: {}", id))?;
-
-    job.enabled = enabled;
-    job.updatedAt = chrono::Utc::now().timestamp();
-    job.save(&state.db).await.map_err(|e| e.to_string())?;
-
-    Ok(())
-}
-
 /// 获取数据存储路径
 #[tauri::command]
 pub async fn get_data_path(state: State<'_, AppState>) -> Result<String, String> {

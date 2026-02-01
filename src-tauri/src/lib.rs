@@ -34,32 +34,15 @@ impl AppState {
 
         std::fs::create_dir_all(&default_config_dir)?;
 
-        // 尝试读取自定义数据路径
+        // 尝试读取自定义数据路径（使用链式调用简化嵌套逻辑）
         let config_file = default_config_dir.join("config.json");
-        let config_dir = if config_file.exists() {
-            if let Ok(content) = std::fs::read_to_string(&config_file) {
-                if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                    if let Some(custom_path) = config.get("data_path").and_then(|v| v.as_str()) {
-                        let custom_dir = PathBuf::from(custom_path);
-                        if custom_dir.exists() && custom_dir.is_dir() {
-                            tracing::debug!("使用自定义数据路径: {:?}", custom_dir);
-                            custom_dir
-                        } else {
-                            tracing::debug!("自定义数据路径无效，使用默认路径");
-                            default_config_dir
-                        }
-                    } else {
-                        default_config_dir
-                    }
-                } else {
-                    default_config_dir
-                }
-            } else {
-                default_config_dir
-            }
-        } else {
-            default_config_dir
-        };
+        let config_dir = std::fs::read_to_string(&config_file)
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+            .and_then(|config| config.get("data_path")?.as_str().map(PathBuf::from))
+            .filter(|p| p.exists() && p.is_dir())
+            .inspect(|p| tracing::debug!("使用自定义数据路径: {:?}", p))
+            .unwrap_or(default_config_dir);
 
         std::fs::create_dir_all(&config_dir)?;
 

@@ -290,20 +290,6 @@ pub async fn cancel_analyze(job_id: String, state: State<'_, AppState>) -> Resul
     }
 }
 
-/// 暂停同步任务（保存当前状态）
-#[tauri::command]
-pub async fn pause_sync(job_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    // 发送取消信号来暂停同步
-    let mut signals = state.cancel_signals.lock().await;
-    if let Some(sender) = signals.remove(&job_id) {
-        let _ = sender.send(());
-        tracing::debug!("同步任务已暂停: {}", job_id);
-        Ok(())
-    } else {
-        Err("没有正在运行的同步任务".to_string())
-    }
-}
-
 /// 获取未完成的传输状态
 #[tauri::command]
 pub async fn get_pending_transfers(

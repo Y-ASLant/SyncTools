@@ -1,5 +1,5 @@
-import { useState, useEffect } from "react";
 import { Check, X, AlertCircle } from "lucide-react";
+import { useDialog } from "../hooks";
 
 export interface MessageDialogProps {
   isOpen: boolean;
@@ -9,6 +9,12 @@ export interface MessageDialogProps {
   onClose: () => void;
 }
 
+const iconColors = {
+  info: "bg-blue-100 dark:bg-blue-900/30 text-blue-500",
+  success: "bg-green-100 dark:bg-green-900/30 text-green-500",
+  error: "bg-red-100 dark:bg-red-900/30 text-red-500",
+};
+
 export function MessageDialog({
   isOpen,
   title,
@@ -16,38 +22,20 @@ export function MessageDialog({
   type = "info",
   onClose,
 }: MessageDialogProps) {
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      setVisible(true);
-      setIsClosing(false);
-    }
-  }, [isOpen]);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      onClose();
-    }, 100);
-  };
+  const { visible, isClosing, handleClose } = useDialog(isOpen, onClose);
 
   if (!visible) return null;
 
-  const iconColors = {
-    info: "bg-blue-100 dark:bg-blue-900/30 text-blue-500",
-    success: "bg-green-100 dark:bg-green-900/30 text-green-500",
-    error: "bg-red-100 dark:bg-red-900/30 text-red-500",
-  };
-
   return (
     <div
-      className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 ${isClosing ? "dialog-overlay-out" : "dialog-overlay"}`}
+      className={`fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/50 ${
+        isClosing ? "dialog-overlay-out" : "dialog-overlay"
+      }`}
     >
       <div
-        className={`w-full max-w-sm bg-white dark:bg-slate-800 rounded shadow-xl ${isClosing ? "dialog-content-out" : "dialog-content"}`}
+        className={`w-full max-w-sm bg-white dark:bg-slate-800 rounded shadow-xl ${
+          isClosing ? "dialog-content-out" : "dialog-content"
+        }`}
       >
         <div className="p-4">
           <div className="flex items-start gap-3">
@@ -74,7 +62,7 @@ export function MessageDialog({
         </div>
         <div className="flex items-center justify-end px-4 py-3 border-t border-slate-200 dark:border-slate-700">
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             className="px-4 py-1.5 rounded text-xs bg-blue-500 hover:bg-blue-600 text-white transition-colors btn-press"
           >
             确定

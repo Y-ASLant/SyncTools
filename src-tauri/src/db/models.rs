@@ -2,15 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// 冲突类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-#[allow(dead_code)]
-pub enum ConflictType {
-    BothModified,
-    OneModifiedOneDeleted,
-}
-
 /// 存储类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
@@ -85,18 +76,6 @@ pub struct SyncJob {
     pub enabled: bool,
     pub createdAt: i64,
     pub updatedAt: i64,
-}
-
-/// 文件信息
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[allow(dead_code)]
-pub struct FileInfo {
-    pub path: String,
-    pub size: u64,
-    pub modified_time: i64,
-    pub is_dir: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub checksum: Option<String>,
 }
 
 /// 同步进度

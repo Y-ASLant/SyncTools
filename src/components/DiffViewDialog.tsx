@@ -12,6 +12,7 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useDialog } from "../hooks";
 
 export interface DiffAction {
   type: "copy" | "delete" | "skip" | "conflict";
@@ -51,29 +52,21 @@ export function DiffViewDialog({
   const [filter, setFilter] = useState<"all" | "copy" | "delete" | "skip">(
     "all",
   );
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   const [isPending, startTransition] = useTransition();
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = 100;
 
+  const { visible, isClosing, handleClose } = useDialog(
+    isOpen && !!diffResult,
+    onClose
+  );
+
+  // 重置页码
   useEffect(() => {
     if (isOpen && diffResult) {
-      setVisible(true);
-      setIsClosing(false);
       setCurrentPage(1);
-    } else if (!isOpen && visible) {
-      setVisible(false);
     }
   }, [isOpen, diffResult]);
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      onClose();
-    }, 100);
-  };
 
   // 使用 useTransition 进行非阻塞筛选
   const handleFilterChange = (
@@ -177,7 +170,7 @@ export function DiffViewDialog({
             </div>
           </div>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <X className="w-4 h-4 text-slate-500" />
@@ -357,7 +350,7 @@ export function DiffViewDialog({
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={handleClose}
+              onClick={() => handleClose()}
               className="px-3 py-1.5 text-xs rounded border border-slate-200 dark:border-slate-600 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors btn-press"
             >
               关闭

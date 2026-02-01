@@ -1,6 +1,7 @@
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { X, FileWarning, Check, Clock, HardDrive } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useDialog } from "../hooks";
 
 export interface ConflictInfo {
   path: string;
@@ -38,24 +39,12 @@ export function ConflictDialog({
   >(new Map());
   const [defaultResolution, setDefaultResolution] =
     useState<ConflictResolution>("keep_source");
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
-
-  useEffect(() => {
-    if (isOpen && conflicts.length > 0) {
-      setVisible(true);
-      setIsClosing(false);
-    }
-  }, [isOpen, conflicts.length]);
-
-  const handleClose = (callback?: () => void) => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      if (callback) callback();
-      else onClose();
-    }, 100);
-  };
+  
+  // 使用自定义 Hook，但需要额外处理 conflicts.length 的条件
+  const { visible, isClosing, handleClose } = useDialog(
+    isOpen && conflicts.length > 0,
+    onClose
+  );
 
   if (!visible || conflicts.length === 0) return null;
 

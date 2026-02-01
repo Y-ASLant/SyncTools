@@ -4,7 +4,7 @@ use anyhow::Result;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tracing::{debug, info};
+use tracing::debug;
 
 /// 文件状态记录
 #[derive(Debug, Clone)]
@@ -109,9 +109,16 @@ impl FileStateManager {
         Ok(())
     }
 
-    /// 批量更新文件状态
+    /// 批量更新文件状态（使用事务优化性能）
     pub async fn batch_upsert(&self, states: &[FileState]) -> Result<()> {
+        if states.is_empty() {
+            return Ok(());
+        }
+
         let now = chrono::Utc::now().timestamp();
+
+        // 使用事务批量插入，显著提高性能
+        let mut tx = self.db.begin().await?;
 
         for state in states {
             sqlx::query(
@@ -129,11 +136,13 @@ impl FileStateManager {
             .bind(state.modified_time)
             .bind(&state.checksum)
             .bind(state.last_sync_time.unwrap_or(now))
-            .execute(&*self.db)
+            .execute(&mut *tx)
             .await?;
         }
 
-        info!("批量更新 {} 个文件状态", states.len());
+        tx.commit().await?;
+
+        debug!("批量更新 {} 个文件状态", states.len());
         Ok(())
     }
 

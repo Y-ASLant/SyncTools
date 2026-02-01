@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   X,
   Folder,
@@ -12,6 +12,7 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { cn } from "../lib/utils";
+import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
 import type {
   StorageType,
@@ -77,8 +78,6 @@ export function CreateJobDialog({
   const [testResults, setTestResults] = useState<
     Record<string, TestConnectionResult>
   >({});
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   const [messageDialog, setMessageDialog] = useState<{
     isOpen: boolean;
     title: string;
@@ -101,12 +100,30 @@ export function CreateJobDialog({
     setMessageDialog({ isOpen: true, title, message, type });
   };
 
-  useEffect(() => {
-    if (isOpen) {
-      setVisible(true);
-      setIsClosing(false);
-    }
-  }, [isOpen]);
+  // 重置表单的回调
+  const resetForm = useCallback(() => {
+    setStep(1);
+    setFormData({
+      name: "",
+      sourceType: "local",
+      destType: "s3",
+      syncMode: "backup",
+      s3Bucket: "",
+      s3Region: "us-east-1",
+      s3AccessKey: "",
+      s3SecretKey: "",
+      s3Endpoint: "",
+      webdavEndpoint: "",
+      webdavUsername: "",
+      webdavPassword: "",
+      localPath: "",
+    });
+    setTestResults({});
+    onClose();
+  }, [onClose]);
+
+  // 使用统一的弹窗 Hook
+  const { visible, isClosing, handleClose } = useDialog(isOpen, resetForm);
 
   // 编辑模式下预填充数据
   useEffect(() => {
@@ -291,31 +308,6 @@ export function CreateJobDialog({
     } finally {
       setIsCreating(false);
     }
-  };
-
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setStep(1);
-      setFormData({
-        name: "",
-        sourceType: "local",
-        destType: "s3",
-        syncMode: "backup",
-        s3Bucket: "",
-        s3Region: "us-east-1",
-        s3AccessKey: "",
-        s3SecretKey: "",
-        s3Endpoint: "",
-        webdavEndpoint: "",
-        webdavUsername: "",
-        webdavPassword: "",
-        localPath: "",
-      });
-      setTestResults({});
-      setVisible(false);
-      onClose();
-    }, 100);
   };
 
   const renderStep1 = () => (
@@ -650,7 +642,7 @@ export function CreateJobDialog({
             )}
           </h2>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <X className="w-4 h-4 text-slate-500" />
@@ -722,7 +714,7 @@ export function CreateJobDialog({
         <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700">
           {isEditing ? (
             <button
-              onClick={handleClose}
+              onClick={() => handleClose()}
               className="px-3 py-1.5 rounded text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
             >
               取消

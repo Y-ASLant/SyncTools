@@ -96,7 +96,6 @@ async fn main() {
             synctools_lib::commands::sync::start_sync,
             synctools_lib::commands::sync::cancel_sync,
             synctools_lib::commands::sync::cancel_analyze,
-            synctools_lib::commands::sync::pause_sync,
             synctools_lib::commands::sync::resume_sync,
             synctools_lib::commands::sync::get_pending_transfers,
             synctools_lib::commands::sync::get_sync_history,

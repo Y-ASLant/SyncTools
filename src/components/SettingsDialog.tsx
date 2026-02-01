@@ -16,6 +16,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import { cn } from "../lib/utils";
 import { useSyncStore } from "../lib/store";
+import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
 import type { LogConfig } from "../lib/types";
 
@@ -113,8 +114,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [autoCreateDir, setAutoCreateDir] = useState(true);
   const [maxConcurrent, setMaxConcurrent] = useState(4);
   const [dataPath, setDataPath] = useState("");
-  const [visible, setVisible] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   const [isMigrating, setIsMigrating] = useState(false);
   const [messageDialog, setMessageDialog] = useState<{
     isOpen: boolean;
@@ -127,10 +126,11 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   const [logEnabled, setLogEnabled] = useState(true);
   const [logMaxSize, setLogMaxSize] = useState(5);
 
+  // 使用统一的弹窗 Hook
+  const { visible, isClosing, handleClose } = useDialog(isOpen, onClose);
+
   useEffect(() => {
     if (isOpen) {
-      setVisible(true);
-      setIsClosing(false);
       // 加载数据路径
       invoke<string>("get_data_path").then(setDataPath).catch(console.error);
       // 加载日志配置
@@ -196,14 +196,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     }
   };
 
-  const handleClose = () => {
-    setIsClosing(true);
-    setTimeout(() => {
-      setVisible(false);
-      onClose();
-    }, 100);
-  };
-
   useEffect(() => {
     // 从 localStorage 读取主题设置
     const savedTheme = localStorage.getItem("theme-preference") as Theme;
@@ -254,7 +246,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             设置
           </h2>
           <button
-            onClick={handleClose}
+            onClick={() => handleClose()}
             className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
             <X className="w-4 h-4 text-slate-500" />
