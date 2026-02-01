@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN">
+    <head>
+        <meta charset="UTF-8" />
+        <link rel="icon" type="image/svg+xml" href="/logo.svg" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>SyncTools - 同步备份工具</title>
+        <style>
+            /* 防止白屏闪烁 - 与应用背景色匹配 */
+            html, body, #root {
+                margin: 0;
+                padding: 0;
+                height: 100%;
+                background-color: #f8fafc; /* slate-50 */
+            }
+            html.dark, html.dark body, html.dark #root {
+                background-color: #020617; /* slate-950 */
+            }
+        </style>
+        <script>
+            // 提前初始化深色模式，防止闪烁
+            (function() {
+                if (localStorage.getItem('dark-mode') === 'true') {
+                    document.documentElement.classList.add('dark');
+                }
+            })();
+        </script>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+    </body>
+</html>

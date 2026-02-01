@@ -1,0 +1,61 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "SyncTools",
+  "version": "1.0.0",
+  "identifier": "com.ASLant.synctools",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "windows": [
+      {
+        "title": "SyncTools",
+        "width": 880,
+        "height": 600,
+        "minWidth": 880,
+        "minHeight": 600,
+        "resizable": true,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "shadow": true,
+        "visible": false
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [],
+    "copyright": "Copyright (c) 2026 ASLant",
+    "category": "Utility",
+    "shortDescription": "高性能文件同步与备份工具",
+    "longDescription": "SyncTools 是一款高性能的文件同步与备份工具，支持本地存储、WebDAV、S3 等多种存储后端，提供双向同步、镜像同步、仅备份等多种同步模式。",
+    "targets": ["nsis"],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "nsis": {
+        "displayLanguageSelector": false,
+        "installerIcon": "icons/icon.ico",
+        "headerImage": null,
+        "sidebarImage": null
+      }
+    }
+  },
+  "plugins": {}
+}

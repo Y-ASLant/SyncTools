@@ -1,0 +1,642 @@
+import { useEffect, useState, useRef } from "react";
+import { useSyncStore } from "./lib/store";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import {
+  RefreshCw,
+  Plus,
+  Trash2,
+  Play,
+  Clock,
+  StopCircle,
+  Pencil,
+  Search,
+  ArrowRight,
+} from "lucide-react";
+import { cn } from "./lib/utils";
+import {
+  CreateJobDialog,
+  SettingsDialog,
+  HistoryPanel,
+  ToastContainer,
+  useToast,
+  TitleBar,
+  ConfirmDialog,
+  DiffViewDialog,
+} from "./components";
+import type { SyncProgress, SyncJob } from "./lib/types";
+import type { DiffResult } from "./components";
+
+function App() {
+  const {
+    jobs,
+    progress,
+    isDarkMode,
+    toggleDarkMode,
+    setProgress,
+    removeJob,
+    clearProgress,
+  } = useSyncStore();
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [editingJob, setEditingJob] = useState<SyncJob | null>(null);
+  const [deletingJob, setDeletingJob] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [historyJob, setHistoryJob] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
+  const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
+  const [analyzingJob, setAnalyzingJob] = useState<string | null>(null);
+  const [diffJobId, setDiffJobId] = useState<string | null>(null);
+  const analyzeAbortRef = useRef<boolean>(false);
+  const [filterMode, setFilterMode] = useState<
+    "all" | "bidirectional" | "mirror" | "backup"
+  >("all");
+  const { toasts, closeToast, success, error: showError, info } = useToast();
+
+  // 初始化：加载任务列表和设置事件监听
+  useEffect(() => {
+    let mounted = true;
+
+    // 加载任务列表
+    const loadJobs = async () => {
+      try {
+        const loadedJobs = await invoke<SyncJob[]>("get_jobs");
+        if (mounted && loadedJobs) {
+          const store = useSyncStore.getState();
+          // 清空并重新加载任务
+          store.jobs.forEach((job) => store.removeJob(job.id));
+          loadedJobs.forEach((job) => store.addJob(job));
+        }
+      } catch (err) {
+        console.error("加载任务失败:", err);
+        // 只在组件仍然挂载时显示错误
+        if (mounted) {
+          // 延迟显示错误，避免在初始化时出现问题
+          setTimeout(() => {
+            if (mounted) {
+              alert("加载任务失败: " + err);
+            }
+          }, 100);
+        }
+      }
+    };
+
+    loadJobs();
+
+    // 监听同步进度事件
+    const unlistenProgress = listen<SyncProgress>("sync-progress", (event) => {
+      if (mounted) {
+        setProgress(event.payload.jobId, event.payload);
+      }
+    });
+
+    // 监听同步完成事件
+    interface SyncCompletePayload {
+      job_id: string;
+      result?: {
+        Ok?: {
+          status: string;
+          errors?: string[];
+          filesFailed?: number;
+        };
+        Err?: string;
+      };
+    }
+    const unlistenComplete = listen<SyncCompletePayload>(
+      "sync-complete",
+      (event) => {
+        if (!mounted) return;
+        const { job_id, result } = event.payload;
+        const store = useSyncStore.getState();
+        const job = store.jobs.find((j) => j.id === job_id);
+        const jobProgress = store.progress[job_id];
+
+        // 尝试获取错误信息
+        const errors = result?.Ok?.errors || [];
+        const firstError = errors.length > 0 ? errors[0] : null;
+
+        if (
+          jobProgress?.status === "completed" &&
+          (!errors || errors.length === 0)
+        ) {
+          success("同步完成", `${job?.name || "任务"} 已成功完成`);
+        } else if (
+          jobProgress?.status === "failed" ||
+          (errors && errors.length > 0)
+        ) {
+          const errorMsg =
+            firstError || `${job?.name || "任务"} 同步过程中出现错误`;
+          showError("同步失败", errorMsg);
+        }
+      },
+    );
+
+    return () => {
+      mounted = false;
+      unlistenProgress.then((fn) => fn());
+      unlistenComplete.then((fn) => fn());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const loadJobs = async () => {
+    try {
+      const loadedJobs = await invoke<SyncJob[]>("get_jobs");
+      if (loadedJobs) {
+        const store = useSyncStore.getState();
+        store.jobs.forEach((job) => store.removeJob(job.id));
+        loadedJobs.forEach((job) => store.addJob(job));
+      }
+    } catch (err) {
+      console.error("加载任务失败:", err);
+      showError("加载失败", String(err));
+    }
+  };
+
+  const handleStartSync = async (jobId: string) => {
+    const job = jobs.find((j) => j.id === jobId);
+    const autoCreateDir = localStorage.getItem("auto-create-dir") !== "false"; // 默认开启
+    const maxConcurrent =
+      parseInt(localStorage.getItem("max-concurrent") || "4") || 4;
+    try {
+      await invoke("start_sync", { jobId, autoCreateDir, maxConcurrent });
+      info("开始同步", `正在同步 ${job?.name || "任务"}...`);
+    } catch (err) {
+      console.error("启动同步失败:", err);
+      showError("启动失败", String(err));
+    }
+  };
+
+  const handleCancelSync = async (jobId: string) => {
+    try {
+      await invoke("cancel_sync", { jobId });
+      clearProgress(jobId);
+      info("已取消", "同步任务已取消");
+    } catch (err) {
+      console.error("取消同步失败:", err);
+      showError("取消失败", String(err));
+    }
+  };
+
+  const handleDeleteJob = async (jobId: string) => {
+    try {
+      await invoke("delete_job", { id: jobId });
+      removeJob(jobId);
+      setDeletingJob(null);
+      success("已删除", "同步任务已删除");
+    } catch (err) {
+      console.error("删除任务失败:", err);
+      showError("删除失败", String(err));
+    }
+  };
+
+  const handleAnalyzeJob = async (jobId: string) => {
+    setAnalyzingJob(jobId);
+    analyzeAbortRef.current = false;
+    try {
+      const result = await invoke<DiffResult>("analyze_job", { jobId });
+      // 如果已取消，忽略结果
+      if (analyzeAbortRef.current) {
+        info("已取消", "分析操作已取消");
+        return;
+      }
+      setDiffResult(result);
+      setDiffJobId(jobId);
+    } catch (err) {
+      if (!analyzeAbortRef.current) {
+        console.error("分析任务失败:", err);
+        showError("分析失败", String(err));
+      }
+    } finally {
+      setAnalyzingJob(null);
+      analyzeAbortRef.current = false;
+    }
+  };
+
+  const handleCancelAnalyze = async () => {
+    if (analyzingJob) {
+      try {
+        await invoke("cancel_analyze", { jobId: analyzingJob });
+      } catch (err) {
+        console.error("取消分析失败:", err);
+      }
+    }
+    analyzeAbortRef.current = true;
+    setAnalyzingJob(null);
+  };
+
+  const handleSyncFromDiff = () => {
+    if (!diffJobId) return;
+    const jobId = diffJobId;
+    // 先关闭弹窗
+    setDiffResult(null);
+    setDiffJobId(null);
+    // 然后启动同步
+    handleStartSync(jobId);
+  };
+
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return "0 B";
+    const k = 1024;
+    const sizes = ["B", "KB", "MB", "GB", "TB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+  };
+
+  const formatDuration = (seconds: number): string => {
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+    return `${Math.floor(seconds / 3600)}h ${Math.floor((seconds % 3600) / 60)}m`;
+  };
+
+  return (
+    <div
+      className={cn(
+        "h-screen flex flex-col bg-slate-50 dark:bg-slate-950",
+        "transition-colors duration-200",
+      )}
+    >
+      {/* 自定义标题栏 */}
+      <TitleBar
+        isDarkMode={isDarkMode}
+        onToggleDarkMode={toggleDarkMode}
+        onOpenSettings={() => setIsSettingsOpen(true)}
+      />
+
+      {/* 主内容 */}
+      <main className="flex-1 overflow-auto p-4 scrollable">
+        {/* 标题栏 */}
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2">
+              <h1 className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                同步任务
+              </h1>
+              {jobs.length > 0 && (
+                <span className="px-1.5 py-0.5 rounded-full text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400">
+                  {jobs.length}
+                </span>
+              )}
+            </div>
+            {/* Segment 筛选器 */}
+            {jobs.length > 0 && (
+              <div className="flex items-center p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {[
+                  { key: "all", label: "全部" },
+                  { key: "bidirectional", label: "双向" },
+                  { key: "mirror", label: "镜像" },
+                  { key: "backup", label: "备份" },
+                ].map((item) => (
+                  <button
+                    key={item.key}
+                    onClick={() => setFilterMode(item.key as typeof filterMode)}
+                    className={cn(
+                      "px-2.5 py-1 text-xs font-medium rounded-md transition-all",
+                      filterMode === item.key
+                        ? "bg-white dark:bg-slate-700 text-slate-900 dark:text-white shadow-sm"
+                        : "text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-300",
+                    )}
+                  >
+                    {item.label}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button
+            onClick={() => setIsDialogOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium rounded-md shadow-sm transition-colors btn-press"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            新建任务
+          </button>
+        </div>
+
+        {/* 任务列表 */}
+        <div className="space-y-2">
+          {(() => {
+            const filteredJobs = jobs.filter((job) => {
+              if (filterMode === "all") return true;
+              return job.syncMode === filterMode;
+            });
+
+            if (jobs.length === 0) {
+              return (
+                <div className="text-center py-20">
+                  <div className="w-12 h-12 rounded bg-slate-100 dark:bg-slate-800 flex items-center justify-center mx-auto mb-3">
+                    <RefreshCw className="w-6 h-6 text-slate-400" />
+                  </div>
+                  <h3 className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    还没有同步任务
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-500 mb-4">
+                    点击右上角"新建任务"开始
+                  </p>
+                </div>
+              );
+            }
+
+            if (filteredJobs.length === 0) {
+              return (
+                <div className="text-center py-12">
+                  <p className="text-sm text-slate-500 dark:text-slate-400">
+                    没有符合筛选条件的任务
+                  </p>
+                </div>
+              );
+            }
+
+            return filteredJobs.map((job) => {
+              const jobProgress = progress[job.id];
+              const isSyncing =
+                jobProgress?.status === "syncing" ||
+                jobProgress?.status === "scanning" ||
+                jobProgress?.status === "comparing";
+              const progressPercent =
+                jobProgress?.filesToSync && jobProgress.filesToSync > 0
+                  ? Math.round(
+                      (jobProgress.filesCompleted / jobProgress.filesToSync) *
+                        100,
+                    )
+                  : 0;
+
+              return (
+                <div
+                  key={job.id}
+                  className={cn(
+                    "bg-white dark:bg-slate-900 rounded border card-hover",
+                    isSyncing
+                      ? "border-blue-400 dark:border-blue-600"
+                      : "border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700",
+                  )}
+                >
+                  <div className="p-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <h3 className="text-sm font-medium text-slate-900 dark:text-white truncate">
+                            {job.name}
+                          </h3>
+                          {!job.enabled && (
+                            <span className="px-1.5 py-0.5 rounded text-xs bg-slate-100 dark:bg-slate-800 text-slate-500">
+                              禁用
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 dark:text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                            {job.sourceConfig.type === "local"
+                              ? "本地"
+                              : job.sourceConfig.type === "s3"
+                                ? "S3"
+                                : "WebDAV"}
+                          </span>
+                          <ArrowRight className="w-3 h-3 text-slate-400" />
+                          <span className="flex items-center gap-1">
+                            {job.destConfig.type === "local"
+                              ? "本地"
+                              : job.destConfig.type === "s3"
+                                ? "S3"
+                                : "WebDAV"}
+                            <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                          </span>
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800">
+                            {job.syncMode === "bidirectional"
+                              ? "双向"
+                              : job.syncMode === "mirror"
+                                ? "镜像"
+                                : "备份"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 ml-3">
+                        {isSyncing ? (
+                          <button
+                            onClick={() => handleCancelSync(job.id)}
+                            className="flex items-center gap-1 px-2 py-1 rounded text-xs bg-red-500 hover:bg-red-600 text-white transition-colors"
+                          >
+                            <StopCircle className="w-3 h-3" />
+                            取消
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              onClick={
+                                analyzingJob === job.id
+                                  ? handleCancelAnalyze
+                                  : () => handleAnalyzeJob(job.id)
+                              }
+                              disabled={
+                                analyzingJob === job.id
+                                  ? false
+                                  : !job.enabled || analyzingJob !== null
+                              }
+                              className={cn(
+                                "flex items-center justify-center gap-1 px-2 py-1 rounded text-xs transition-colors btn-press",
+                                analyzingJob === job.id
+                                  ? "bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
+                                  : !job.enabled || analyzingJob !== null
+                                    ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                                    : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
+                              )}
+                              title={
+                                analyzingJob === job.id
+                                  ? "点击取消"
+                                  : "分析差异"
+                              }
+                            >
+                              {analyzingJob === job.id ? (
+                                <>
+                                  <RefreshCw className="w-3 h-3 animate-spin" />
+                                  取消
+                                </>
+                              ) : (
+                                <>
+                                  <Search className="w-3 h-3" />
+                                  分析
+                                </>
+                              )}
+                            </button>
+                            <button
+                              onClick={() => handleStartSync(job.id)}
+                              disabled={!job.enabled}
+                              className={cn(
+                                "flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors btn-press",
+                                !job.enabled
+                                  ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
+                                  : "bg-blue-500 hover:bg-blue-600 text-white",
+                              )}
+                            >
+                              <Play className="w-3 h-3" />
+                              同步
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => setEditingJob(job)}
+                          disabled={isSyncing}
+                          className={cn(
+                            "p-1 rounded transition-colors",
+                            isSyncing
+                              ? "text-slate-300 dark:text-slate-700 cursor-not-allowed"
+                              : "text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-slate-800",
+                          )}
+                          title="编辑任务"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            setHistoryJob({ id: job.id, name: job.name })
+                          }
+                          className="p-1 rounded text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                          title="查看历史"
+                        >
+                          <Clock className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() =>
+                            setDeletingJob({ id: job.id, name: job.name })
+                          }
+                          disabled={isSyncing}
+                          className={cn(
+                            "p-1 rounded transition-colors",
+                            isSyncing
+                              ? "text-slate-300 dark:text-slate-700 cursor-not-allowed"
+                              : "text-slate-400 hover:text-red-500 hover:bg-slate-100 dark:hover:bg-slate-800",
+                          )}
+                          title="删除任务"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* 进度条 */}
+                    {jobProgress && isSyncing && (
+                      <div className="mt-3 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center justify-between text-xs mb-1">
+                          <span className="text-slate-500">
+                            {jobProgress.phase || "准备中..."}
+                          </span>
+                          <span className="text-slate-700 dark:text-slate-300">
+                            {jobProgress.filesCompleted}/
+                            {jobProgress.filesToSync || "?"}
+                            {progressPercent > 0 && ` (${progressPercent}%)`}
+                          </span>
+                        </div>
+                        <div className="h-1 bg-slate-100 dark:bg-slate-800 rounded overflow-hidden">
+                          <div
+                            className="h-full bg-blue-500 transition-all duration-300"
+                            style={{ width: `${progressPercent}%` }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
+                          <span className="truncate max-w-xs">
+                            {jobProgress.currentFile ||
+                              (jobProgress.filesScanned
+                                ? `已扫描 ${jobProgress.filesScanned} 个文件`
+                                : "")}
+                          </span>
+                          <div className="flex items-center gap-2">
+                            {jobProgress.speed > 0 && (
+                              <span>{formatBytes(jobProgress.speed)}/s</span>
+                            )}
+                            {jobProgress.eta > 0 && (
+                              <span>
+                                剩余 {formatDuration(jobProgress.eta)}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 完成状态 */}
+                    {jobProgress?.status === "completed" && (
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <div className="flex items-center gap-1.5 text-green-600 dark:text-green-500 text-xs">
+                          <RefreshCw className="w-3 h-3" />
+                          <span>
+                            完成，共 {jobProgress.filesCompleted} 个文件
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 失败状态 */}
+                    {jobProgress?.status === "failed" && (
+                      <div className="mt-2 pt-2 border-t border-slate-100 dark:border-slate-800">
+                        <div className="text-red-500 text-xs">
+                          同步失败，请检查配置后重试
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            });
+          })()}
+        </div>
+      </main>
+
+      {/* 创建/编辑任务对话框 */}
+      <CreateJobDialog
+        isOpen={isDialogOpen || editingJob !== null}
+        onClose={() => {
+          setIsDialogOpen(false);
+          setEditingJob(null);
+        }}
+        onJobCreated={loadJobs}
+        editJob={editingJob}
+      />
+
+      {/* 设置对话框 */}
+      <SettingsDialog
+        isOpen={isSettingsOpen}
+        onClose={() => setIsSettingsOpen(false)}
+      />
+
+      {/* 历史记录面板 */}
+      <HistoryPanel
+        isOpen={historyJob !== null}
+        onClose={() => setHistoryJob(null)}
+        jobId={historyJob?.id || ""}
+        jobName={historyJob?.name || ""}
+      />
+
+      {/* 删除确认对话框 */}
+      <ConfirmDialog
+        isOpen={deletingJob !== null}
+        title="删除任务"
+        message={`确定要删除任务 "${deletingJob?.name}" 吗？此操作不可撤销。`}
+        confirmText="删除"
+        cancelText="取消"
+        danger
+        onConfirm={() => deletingJob && handleDeleteJob(deletingJob.id)}
+        onCancel={() => setDeletingJob(null)}
+      />
+
+      {/* 差异视图对话框 */}
+      <DiffViewDialog
+        isOpen={diffResult !== null}
+        onClose={() => {
+          setDiffResult(null);
+          setDiffJobId(null);
+        }}
+        diffResult={diffResult}
+        onSync={handleSyncFromDiff}
+      />
+
+      {/* Toast 通知 */}
+      <ToastContainer toasts={toasts} onClose={closeToast} />
+    </div>
+  );
+}
+
+export default App;
