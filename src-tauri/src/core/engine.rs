@@ -88,9 +88,8 @@ struct TransferStats {
     bytes_transferred: AtomicU64,
 }
 
-/// 执行结果，包含字节数和可选的 hash
+/// 执行结果，包含文件状态信息
 struct ActionResult {
-    bytes: u64,
     file_path: Option<String>,
     file_hash: Option<String>,
     file_size: Option<i64>,
@@ -98,7 +97,6 @@ struct ActionResult {
 
 /// 带重试的动作执行结果
 struct RetryResult {
-    bytes: u64,
     file_state: Option<FileState>,
 }
 
@@ -747,6 +745,14 @@ impl SyncEngine {
                 };
 
                 if let Some(tx) = &progress_tx_clone {
+                    debug!(
+                        "进度更新: {}/{} MB ({:.1}%), 速度: {:.2} MB/s",
+                        bytes / 1024 / 1024,
+                        bytes_total / 1024 / 1024,
+                        (bytes as f64 / bytes_total.max(1) as f64) * 100.0,
+                        speed as f64 / 1024.0 / 1024.0
+                    );
+                    
                     let _ = tx
                         .send(SyncProgress {
                             jobId: job_id_clone.clone(),
@@ -765,6 +771,8 @@ impl SyncEngine {
                             startTime: start_time,
                         })
                         .await;
+                } else {
+                    warn!("进度通道为空，无法发送进度更新！");
                 }
 
                 // 检查是否完成
@@ -791,6 +799,7 @@ impl SyncEngine {
             let retry_delay = self.config.retry_base_delay_ms;
             let job_id = job_id.to_string();
 
+            let stats_clone = stats.clone();
             let handle = tokio::spawn(async move {
                 let result = Self::execute_action_with_retry(
                     &action,
@@ -800,13 +809,14 @@ impl SyncEngine {
                     retry_delay,
                     &cancelled,
                     &job_id,
+                    Some(&stats_clone),
                 )
                 .await;
 
                 match result {
                     Ok(retry_result) => {
                         stats.files_completed.fetch_add(1, Ordering::Relaxed);
-                        stats.bytes_transferred.fetch_add(retry_result.bytes, Ordering::Relaxed);
+                        // 注意：字节数已在传输过程中实时更新，这里不再累加
                         
                         // 收集成功同步的文件状态
                         if let Some(state) = retry_result.file_state {
@@ -875,6 +885,7 @@ impl SyncEngine {
         base_delay_ms: u64,
         cancelled: &AtomicBool,
         job_id: &str,
+        stats: Option<&Arc<TransferStats>>,
     ) -> Result<RetryResult, String> {
         let mut last_error = String::new();
 
@@ -883,7 +894,7 @@ impl SyncEngine {
                 return Err("操作已取消".to_string());
             }
 
-            match Self::execute_action(action, source, dest).await {
+            match Self::execute_action(action, source, dest, stats).await {
                 Ok(result) => {
                     // 如果有文件信息，创建 FileState
                     let file_state = if let (Some(path), Some(hash), Some(size)) = 
@@ -901,7 +912,6 @@ impl SyncEngine {
                     };
                     
                     return Ok(RetryResult {
-                        bytes: result.bytes,
                         file_state,
                     });
                 }
@@ -941,6 +951,7 @@ impl SyncEngine {
         action: &SyncAction,
         source: &dyn Storage,
         dest: &dyn Storage,
+        stats: Option<&Arc<TransferStats>>,
     ) -> Result<ActionResult> {
         match action {
             SyncAction::Copy {
@@ -960,6 +971,83 @@ impl SyncEngine {
                     from_path, to_path, size, reverse
                 );
 
+                // Windows 平台对单次 I/O 操作有约 4GB 限制
+                // 对于接近此限制的文件，需要特殊处理
+                const WINDOWS_IO_LIMIT: u64 = 3 * 1024 * 1024 * 1024; // 3GB 安全阈值
+                
+                if *size > WINDOWS_IO_LIMIT {
+                    // 超大文件：临时文件 + 8MB 块流式传输（2026 生产级方案）
+                    // 优点：内存峰值仅 8MB，支持任意大小文件，8MB 块优化网络效率
+                    debug!("  大文件流式传输 ({}GB, 块大小: 8MB)", size / 1024 / 1024 / 1024);
+                    
+                    use tokio::io::AsyncWriteExt;
+                    use futures::stream::StreamExt;
+                    
+                    // 8MB 是网络传输最优块大小（减少系统调用，充分利用带宽）
+                    const CHUNK_SIZE: u64 = 8 * 1024 * 1024; // 8MB
+                    
+                    let total_size = *size;
+                    let temp_dir = std::env::temp_dir();
+                    let temp_filename = format!("synctools_{}.tmp", uuid::Uuid::new_v4());
+                    let temp_path = temp_dir.join(&temp_filename);
+                    
+                    // 阶段1：分块读取源文件，写入临时文件，计算 hash
+                    debug!("  阶段1: 缓存到临时文件...");
+                    let mut temp_file = tokio::fs::File::create(&temp_path).await?;
+                    let mut hasher = blake3::Hasher::new();
+                    let mut offset = 0u64;
+                    
+                    while offset < total_size {
+                        let chunk_len = (total_size - offset).min(CHUNK_SIZE);
+                        let chunk = from.read_range(from_path, offset, chunk_len).await?;
+                        
+                        hasher.update(&chunk);
+                        temp_file.write_all(&chunk).await?;
+                        offset += chunk.len() as u64;
+                    }
+                    
+                    temp_file.flush().await?;
+                    drop(temp_file);
+                    
+                    let file_hash = hasher.finalize().to_hex().to_string();
+                    
+                    // 阶段2：使用 8MB 块流式上传（关键优化）
+                    debug!("  阶段2: 8MB 块流式上传...");
+                    let temp_file = tokio::fs::File::open(&temp_path).await?;
+                    
+                    // 使用 8MB 缓冲区的 ReaderStream（默认是 4KB，太小）
+                    let reader_stream = tokio_util::io::ReaderStream::with_capacity(temp_file, 8 * 1024 * 1024);
+                    
+                    let stats_clone = stats.map(|s| s.clone());
+                    let byte_stream = reader_stream.map(move |result| {
+                        result
+                            .map(|bytes| {
+                                let len = bytes.len();
+                                
+                                // 更新上传进度（真实网速）
+                                if let Some(ref s) = stats_clone {
+                                    s.bytes_transferred.fetch_add(len as u64, Ordering::Relaxed);
+                                }
+                                
+                                bytes.to_vec()
+                            })
+                            .map_err(|e| anyhow::Error::from(e))
+                    });
+                    
+                    to.write_stream(to_path, Box::pin(byte_stream), Some(total_size)).await?;
+                    
+                    // 清理临时文件
+                    let _ = tokio::fs::remove_file(&temp_path).await;
+                    debug!("  流式传输完成");
+                    
+                    return Ok(ActionResult {
+                        file_path: if !*reverse { Some(source_path.clone()) } else { None },
+                        file_hash: if !*reverse { Some(file_hash) } else { None },
+                        file_size: if !*reverse { Some(total_size as i64) } else { None },
+                    });
+                }
+                
+                // 常规文件传输
                 let data = from.read(from_path).await?;
                 debug!("  读取完成: {} 实际{}字节", from_path, data.len());
 
@@ -969,9 +1057,13 @@ impl SyncEngine {
 
                 to.write(to_path, data).await?;
                 debug!("  写入完成: {}", to_path);
+                
+                // 更新进度
+                if let Some(s) = stats {
+                    s.bytes_transferred.fetch_add(*size, Ordering::Relaxed);
+                }
 
                 Ok(ActionResult {
-                    bytes: *size,
                     file_path: if !*reverse { Some(source_path.clone()) } else { None },
                     file_hash: if !*reverse { Some(file_hash) } else { None },
                     file_size: if !*reverse { Some(file_size) } else { None },
@@ -981,14 +1073,12 @@ impl SyncEngine {
                 let storage = if *from_dest { dest } else { source };
                 storage.delete(path).await?;
                 Ok(ActionResult {
-                    bytes: 0,
                     file_path: None,
                     file_hash: None,
                     file_size: None,
                 })
             }
             SyncAction::Skip { .. } => Ok(ActionResult {
-                bytes: 0,
                 file_path: None,
                 file_hash: None,
                 file_size: None,

@@ -3,10 +3,14 @@ use anyhow::Result;
 use async_trait::async_trait;
 use futures::TryStreamExt;
 use opendal::{Metakey, Operator};
+use std::pin::Pin;
 
 pub struct WebDavStorage {
     operator: Operator,
     name: String,
+    endpoint: String,
+    username: String,
+    password: String,
 }
 
 impl WebDavStorage {
@@ -41,7 +45,13 @@ impl WebDavStorage {
         // 忽略错误，目录可能已存在或不需要创建
         let _ = operator.create_dir("/").await;
 
-        Ok(Self { operator, name })
+        Ok(Self {
+            operator,
+            name,
+            endpoint: endpoint.to_string(),
+            username: username.to_string(),
+            password: password.to_string(),
+        })
     }
 }
 
@@ -130,6 +140,67 @@ impl Storage for WebDavStorage {
         }
         
         self.operator.write(path, data).await?;
+        Ok(())
+    }
+    
+    async fn write_stream(
+        &self,
+        path: &str,
+        stream: Pin<Box<dyn futures::Stream<Item = Result<Vec<u8>>> + Send>>,
+        total_size: Option<u64>,
+    ) -> Result<()> {
+        use futures::StreamExt;
+        use reqwest::Body;
+        
+        // 规范化路径
+        let path_normalized = path.replace('\\', "/").trim_start_matches('/').to_string();
+        
+        // 确保父目录存在
+        if let Some(parent) = std::path::Path::new(&path_normalized).parent() {
+            let parent_str = parent.to_string_lossy().replace('\\', "/");
+            if !parent_str.is_empty() && parent_str != "." {
+                let parts: Vec<&str> = parent_str.split('/').filter(|s| !s.is_empty()).collect();
+                let mut current_path = String::new();
+                for part in parts {
+                    current_path.push_str(part);
+                    current_path.push('/');
+                    let _ = self.operator.create_dir(&current_path).await;
+                }
+            }
+        }
+        
+        // 使用 reqwest 直接进行流式 PUT 请求（绕过 OpenDAL 限制）
+        let url = format!("{}/{}", self.endpoint.trim_end_matches('/'), path_normalized);
+        
+        // 将 Stream<Result<Vec<u8>>> 转换为 Stream<Result<Bytes>>
+        let bytes_stream = stream.map(|result| {
+            result.map(|vec| bytes::Bytes::from(vec))
+                .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        });
+        
+        let body = Body::wrap_stream(bytes_stream);
+        
+        let client = reqwest::Client::new();
+        let mut request = client.put(&url).body(body);
+        
+        // 添加认证
+        request = request.basic_auth(&self.username, Some(&self.password));
+        
+        // 如果知道大小，添加 Content-Length
+        if let Some(size) = total_size {
+            request = request.header("Content-Length", size.to_string());
+        }
+        
+        let response = request.send().await?;
+        
+        if !response.status().is_success() {
+            return Err(anyhow::anyhow!(
+                "WebDAV PUT 失败: {} - {}",
+                response.status(),
+                response.text().await.unwrap_or_default()
+            ));
+        }
+        
         Ok(())
     }
 
