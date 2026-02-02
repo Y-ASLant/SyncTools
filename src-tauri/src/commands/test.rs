@@ -19,13 +19,14 @@ pub async fn test_connection(
     secret_key: Option<String>,
     endpoint: Option<String>,
     webdav_endpoint: Option<String>,
+    root: Option<String>,
     username: Option<String>,
     password: Option<String>,
 ) -> Result<TestConnectionResult, String> {
     match typ.as_str() {
         "local" => test_local_connection(&path).await,
         "s3" => test_s3_connection(&bucket, &region, &access_key, &secret_key, &endpoint).await,
-        "webdav" => test_webdav_connection(&webdav_endpoint, &username, &password).await,
+        "webdav" => test_webdav_connection(&webdav_endpoint, &root, &username, &password).await,
         _ => Ok(TestConnectionResult {
             success: false,
             message: "不支持的存储类型".to_string(),
@@ -133,6 +134,7 @@ async fn test_s3_connection(
 
 async fn test_webdav_connection(
     webdav_endpoint: &Option<String>,
+    root: &Option<String>,
     username: &Option<String>,
     password: &Option<String>,
 ) -> Result<TestConnectionResult, String> {
@@ -151,8 +153,21 @@ async fn test_webdav_connection(
         .as_ref()
         .ok_or_else(|| "WebDAV 密码不能为空".to_string())?;
 
+    // 如果有 root 路径，将其拼接到 endpoint 中（避免 OpenDAL 的 URL 编码问题）
+    let final_endpoint = if let Some(r) = root {
+        if !r.is_empty() {
+            let trimmed_endpoint = endpoint.trim_end_matches('/');
+            let trimmed_root = r.trim_start_matches('/').trim_end_matches('/');
+            format!("{}/{}", trimmed_endpoint, trimmed_root)
+        } else {
+            endpoint.clone()
+        }
+    } else {
+        endpoint.clone()
+    };
+
     let builder = Webdav::default()
-        .endpoint(endpoint)
+        .endpoint(&final_endpoint)
         .username(username)
         .password(password);
 
@@ -161,11 +176,13 @@ async fn test_webdav_connection(
         .finish();
 
     match operator.list("").await {
-        Ok(_) => Ok(TestConnectionResult {
-            success: true,
-            message: "WebDAV 连接成功".to_string(),
-            details: Some(endpoint.clone()),
-        }),
+        Ok(_) => {
+            Ok(TestConnectionResult {
+                success: true,
+                message: "WebDAV 连接成功".to_string(),
+                details: Some(final_endpoint),
+            })
+        }
         Err(e) => Ok(TestConnectionResult {
             success: false,
             message: "WebDAV 连接失败".to_string(),

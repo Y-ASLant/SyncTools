@@ -3,10 +3,11 @@
 
 use synctools_lib::logging::{get_log_dir, LogConfig, SizeRotatingWriter};
 use synctools_lib::AppState;
+use std::sync::Arc;
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Listener, Manager, WindowEvent,
+    AppHandle, Listener, Manager, RunEvent, WindowEvent,
 };
 use tracing_subscriber::prelude::*;
 
@@ -68,8 +69,11 @@ async fn main() {
     let state = AppState::new()
         .await
         .expect("Failed to initialize application state");
+    
+    // 包装在 Arc 中以便在退出时访问
+    let state_for_cleanup = Arc::new(state.clone());
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(state)
@@ -140,6 +144,20 @@ async fn main() {
             synctools_lib::commands::transfer::get_transfer_config,
             synctools_lib::commands::transfer::set_transfer_config,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    // 运行应用并处理退出事件
+    app.run(move |_app_handle, event| {
+        if let RunEvent::Exit = event {
+            // 应用退出时清理资源
+            let state = state_for_cleanup.clone();
+            // 使用 block_on 同步执行异步清理
+            tokio::task::block_in_place(|| {
+                tokio::runtime::Handle::current().block_on(async {
+                    state.cleanup().await;
+                });
+            });
+        }
+    });
 }

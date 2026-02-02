@@ -1,7 +1,9 @@
+use sqlx::sqlite::SqlitePoolOptions;
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::Mutex;
 
 pub mod commands;
@@ -47,7 +49,7 @@ impl AppState {
 
         std::fs::create_dir_all(&config_dir)?;
 
-        // 初始化数据库
+        // 初始化数据库（带连接池配置）
         let db_path = config_dir.join("synctools.db");
         // SQLite 连接字符串格式: sqlite://path 或 sqlite:path
         // Windows 路径需要转换反斜杠为正斜杠
@@ -55,7 +57,13 @@ impl AppState {
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Invalid database path"))?
             .replace('\\', "/");
-        let db = SqlitePool::connect(&format!("sqlite:{}?mode=rwc", db_path_str)).await?;
+        
+        let db = SqlitePoolOptions::new()
+            .max_connections(5)  // SQLite 单文件，不需要太多连接
+            .acquire_timeout(Duration::from_secs(30))
+            .idle_timeout(Duration::from_secs(600))  // 10分钟空闲超时
+            .connect(&format!("sqlite:{}?mode=rwc", db_path_str))
+            .await?;
 
         // 运行数据库迁移
         sqlx::migrate!("./migrations").run(&db).await?;
@@ -67,6 +75,35 @@ impl AppState {
             cancel_signals: Arc::new(Mutex::new(HashMap::new())),
             analyze_cancels: Arc::new(Mutex::new(HashMap::new())),
         })
+    }
+
+    /// 清理资源（应用关闭时调用）
+    pub async fn cleanup(&self) {
+        tracing::info!("正在清理应用资源...");
+
+        // 1. 取消所有正在进行的同步任务
+        {
+            let mut signals = self.cancel_signals.lock().await;
+            for (job_id, sender) in signals.drain() {
+                tracing::debug!("取消同步任务: {}", job_id);
+                let _ = sender.send(());
+            }
+        }
+
+        // 2. 标记所有分析任务为已取消
+        {
+            let cancels = self.analyze_cancels.lock().await;
+            for (job_id, flag) in cancels.iter() {
+                tracing::debug!("取消分析任务: {}", job_id);
+                flag.store(true, std::sync::atomic::Ordering::SeqCst);
+            }
+        }
+
+        // 3. 关闭数据库连接池
+        tracing::debug!("关闭数据库连接池...");
+        self.db.close().await;
+
+        tracing::info!("资源清理完成");
     }
 }
 

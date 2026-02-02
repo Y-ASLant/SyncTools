@@ -12,6 +12,13 @@ pub use local::LocalStorage;
 pub use s3::S3Storage;
 pub use webdav::WebDavStorage;
 
+// ============ 公共常量 ============
+
+/// 非 IO 操作超时（秒）- stat, delete 等
+pub const OP_TIMEOUT_SECS: u64 = 60;
+/// IO 操作超时（秒）- read, write 等
+pub const IO_TIMEOUT_SECS: u64 = 300;
+
 /// 文件信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FileInfo {

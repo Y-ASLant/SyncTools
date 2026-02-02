@@ -1,8 +1,9 @@
-use super::{FileInfo, FileMeta, Storage};
+use super::{FileInfo, FileMeta, Storage, IO_TIMEOUT_SECS, OP_TIMEOUT_SECS};
 use anyhow::Result;
 use async_trait::async_trait;
 use futures::TryStreamExt;
-use opendal::{Metakey, Operator};
+use opendal::{layers::TimeoutLayer, Metakey, Operator};
+use std::time::Duration;
 
 pub struct S3Storage {
     operator: Operator,
@@ -34,7 +35,14 @@ impl S3Storage {
             builder = builder.root(p);
         }
 
-        let operator = Operator::new(builder)?.finish();
+        // 添加超时层
+        let operator = Operator::new(builder)?
+            .layer(
+                TimeoutLayer::default()
+                    .with_timeout(Duration::from_secs(OP_TIMEOUT_SECS))
+                    .with_io_timeout(Duration::from_secs(IO_TIMEOUT_SECS))
+            )
+            .finish();
 
         let name = format!(
             "s3://{}{}",

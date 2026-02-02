@@ -39,9 +39,14 @@ fn load_config_section<T: DeserializeOwned + Default>(config_dir: &Path, section
     T::default()
 }
 
-/// 保存配置到指定 section
+/// 保存配置到指定 section（原子写入，防止并发丢失）
 fn save_config_section<T: Serialize>(config_dir: &Path, section: &str, value: &T) -> io::Result<()> {
     let config_file = config_dir.join(CONFIG_FILE_NAME);
+    
+    // 确保配置目录存在
+    if !config_dir.exists() {
+        fs::create_dir_all(config_dir)?;
+    }
     
     // 读取现有配置
     let mut config: serde_json::Value = if config_file.exists() {
@@ -52,11 +57,25 @@ fn save_config_section<T: Serialize>(config_dir: &Path, section: &str, value: &T
     };
     
     // 更新指定 section
-    config[section] = serde_json::to_value(value).unwrap();
+    config[section] = serde_json::to_value(value)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     
-    // 写入文件
-    let content = serde_json::to_string_pretty(&config).unwrap();
-    fs::write(&config_file, content)?;
+    // 序列化配置
+    let content = serde_json::to_string_pretty(&config)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    
+    // 原子写入：先写临时文件，再重命名
+    let temp_file = config_dir.join(format!("{}.tmp", CONFIG_FILE_NAME));
+    fs::write(&temp_file, &content)?;
+    
+    // Windows 上 rename 不会覆盖已存在的文件，需要先删除
+    #[cfg(windows)]
+    if config_file.exists() {
+        let _ = fs::remove_file(&config_file);
+    }
+    
+    // 重命名（在大多数文件系统上是原子操作）
+    fs::rename(&temp_file, &config_file)?;
     
     Ok(())
 }

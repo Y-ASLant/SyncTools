@@ -754,6 +754,10 @@ impl SyncEngine {
         let progress_handle = tokio::spawn(async move {
             let mut last_bytes = 0u64;
             let mut last_time = Instant::now();
+            let transfer_start = Instant::now();
+            // 使用指数移动平均平滑速度（权重 0.3 给新值，0.7 给旧值）
+            let mut smoothed_speed: f64 = 0.0;
+            const SPEED_SMOOTHING_FACTOR: f64 = 0.3;
 
             loop {
                 tokio::time::sleep(Duration::from_millis(PROGRESS_UPDATE_INTERVAL_MS)).await;
@@ -766,21 +770,37 @@ impl SyncEngine {
                 let failed = stats_clone.files_failed.load(Ordering::Relaxed);
                 let bytes = stats_clone.bytes_transferred.load(Ordering::Relaxed);
 
-                // 计算速度
+                // 计算瞬时速度
                 let now = Instant::now();
                 let elapsed = now.duration_since(last_time).as_secs_f64();
-                let speed = if elapsed > 0.0 {
-                    ((bytes - last_bytes) as f64 / elapsed) as u64
+                let instant_speed = if elapsed > 0.0 {
+                    (bytes - last_bytes) as f64 / elapsed
                 } else {
-                    0
+                    0.0
                 };
                 last_bytes = bytes;
                 last_time = now;
 
-                // 计算 ETA
+                // 使用指数移动平均平滑速度
+                if smoothed_speed == 0.0 {
+                    smoothed_speed = instant_speed;
+                } else if instant_speed > 0.0 {
+                    smoothed_speed = SPEED_SMOOTHING_FACTOR * instant_speed + (1.0 - SPEED_SMOOTHING_FACTOR) * smoothed_speed;
+                }
+
+                let speed = smoothed_speed as u64;
+
+                // 计算 ETA（使用平均速度更稳定）
+                let total_elapsed = transfer_start.elapsed().as_secs_f64();
+                let avg_speed = if total_elapsed > 1.0 && bytes > 0 {
+                    bytes as f64 / total_elapsed
+                } else {
+                    smoothed_speed
+                };
+                
                 let remaining_bytes = bytes_total.saturating_sub(bytes);
-                let eta = if speed > 0 {
-                    remaining_bytes / speed
+                let eta = if avg_speed > 100.0 {  // 最小 100 字节/秒才显示 ETA
+                    (remaining_bytes as f64 / avg_speed) as u64
                 } else {
                     0
                 };
@@ -829,7 +849,13 @@ impl SyncEngine {
                 break;
             }
 
-            let permit = semaphore.clone().acquire_owned().await.unwrap();
+            let permit = match semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(_) => {
+                    tracing::error!("Semaphore closed unexpectedly");
+                    break;
+                }
+            };
             let source = source_storage.clone();
             let dest = dest_storage.clone();
             let stats = stats.clone();

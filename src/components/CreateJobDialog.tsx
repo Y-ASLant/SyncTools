@@ -41,6 +41,7 @@ interface FormData {
   sourceS3SecretKey: string;
   sourceS3Endpoint: string;
   sourceWebdavEndpoint: string;
+  sourceWebdavRoot: string;
   sourceWebdavUsername: string;
   sourceWebdavPassword: string;
   // 目标存储配置
@@ -51,6 +52,7 @@ interface FormData {
   destS3SecretKey: string;
   destS3Endpoint: string;
   destWebdavEndpoint: string;
+  destWebdavRoot: string;
   destWebdavUsername: string;
   destWebdavPassword: string;
 }
@@ -81,6 +83,7 @@ export function CreateJobDialog({
     sourceS3SecretKey: "",
     sourceS3Endpoint: "",
     sourceWebdavEndpoint: "",
+    sourceWebdavRoot: "",
     sourceWebdavUsername: "",
     sourceWebdavPassword: "",
     // 目标存储配置
@@ -91,6 +94,7 @@ export function CreateJobDialog({
     destS3SecretKey: "",
     destS3Endpoint: "",
     destWebdavEndpoint: "",
+    destWebdavRoot: "",
     destWebdavUsername: "",
     destWebdavPassword: "",
   });
@@ -138,6 +142,7 @@ export function CreateJobDialog({
       sourceS3SecretKey: "",
       sourceS3Endpoint: "",
       sourceWebdavEndpoint: "",
+      sourceWebdavRoot: "",
       sourceWebdavUsername: "",
       sourceWebdavPassword: "",
       destLocalPath: "",
@@ -147,6 +152,7 @@ export function CreateJobDialog({
       destS3SecretKey: "",
       destS3Endpoint: "",
       destWebdavEndpoint: "",
+      destWebdavRoot: "",
       destWebdavUsername: "",
       destWebdavPassword: "",
     });
@@ -176,6 +182,7 @@ export function CreateJobDialog({
         sourceS3SecretKey: editJob.sourceConfig.secretKey || "",
         sourceS3Endpoint: editJob.sourceConfig.endpoint || "",
         sourceWebdavEndpoint: editJob.sourceConfig.webdavEndpoint || "",
+        sourceWebdavRoot: editJob.sourceConfig.root || "",
         sourceWebdavUsername: editJob.sourceConfig.username || "",
         sourceWebdavPassword: editJob.sourceConfig.password || "",
         // 目标存储配置
@@ -186,6 +193,7 @@ export function CreateJobDialog({
         destS3SecretKey: editJob.destConfig.secretKey || "",
         destS3Endpoint: editJob.destConfig.endpoint || "",
         destWebdavEndpoint: editJob.destConfig.webdavEndpoint || "",
+        destWebdavRoot: editJob.destConfig.root || "",
         destWebdavUsername: editJob.destConfig.username || "",
         destWebdavPassword: editJob.destConfig.password || "",
       });
@@ -216,6 +224,7 @@ export function CreateJobDialog({
         secretKey: isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey || null,
         endpoint: isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint || null,
         webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint || null,
+        root: isSource ? formData.sourceWebdavRoot : formData.destWebdavRoot || null,
         username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername || null,
         password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword || null,
       });
@@ -289,6 +298,7 @@ export function CreateJobDialog({
         return {
           type: "webdav",
           webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint,
+          root: (isSource ? formData.sourceWebdavRoot : formData.destWebdavRoot) || undefined,
           username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername,
           password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword,
         };
@@ -684,7 +694,16 @@ export function CreateJobDialog({
             onChange={(e) =>
               setFormData({ ...formData, [isSource ? "sourceWebdavEndpoint" : "destWebdavEndpoint"]: e.target.value })
             }
-            placeholder="https://dav.example.com"
+            placeholder="服务器地址 (如: https://dav.example.com)"
+            className={inputClass}
+          />
+          <input
+            type="text"
+            value={isSource ? formData.sourceWebdavRoot : formData.destWebdavRoot}
+            onChange={(e) =>
+              setFormData({ ...formData, [isSource ? "sourceWebdavRoot" : "destWebdavRoot"]: e.target.value })
+            }
+            placeholder="路径 (如: webdav/Sync/MyFolder，可选)"
             className={inputClass}
           />
           <input
