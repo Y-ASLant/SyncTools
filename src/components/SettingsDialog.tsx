@@ -14,9 +14,12 @@ import {
   Clock,
   Layers,
   Gauge,
+  GithubIcon,
+  User,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
+import { open as openUrl } from "@tauri-apps/plugin-shell";
 import { cn } from "../lib/utils";
 import { useSyncStore } from "../lib/store";
 import { useDialog } from "../hooks";
@@ -373,44 +376,32 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             </div>
           </div>
 
-          {/* 右上 - 数据存储 */}
-          <div>
+          {/* 右上 - 关于 */}
+          <div className="flex flex-col">
             <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">
-              数据存储
+              关于
             </h3>
-            <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
-              <div className="flex items-center gap-2 flex-1 min-w-0">
-                <div className="w-7 h-7 rounded-md bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center shrink-0">
-                  <Database className="w-3.5 h-3.5 text-purple-500" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-slate-900 dark:text-white">
-                    保存位置
-                  </p>
-                  <p
-                    className="text-xs text-slate-500 dark:text-slate-400 truncate"
-                    title={dataPath}
-                  >
-                    {dataPath || "加载中..."}
-                  </p>
-                </div>
+            <div className="flex-1 flex items-center">
+              <div className="grid grid-cols-2 gap-2 w-full">
+                <button
+                  onClick={() => openUrl("https://github.com/Y-ASLant")}
+                  className="flex items-center justify-center gap-1.5 px-2 py-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all"
+                >
+                  <User className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-900 dark:text-white">ASLant</span>
+                </button>
+                <button
+                  onClick={() => openUrl("https://github.com/Y-ASLant/SyncTools")}
+                  className="flex items-center justify-center gap-1.5 px-2 py-3 rounded-lg border border-slate-200 dark:border-slate-700 hover:border-slate-300 dark:hover:border-slate-600 hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-all"
+                >
+                  <GithubIcon className="w-4 h-4 text-slate-500" />
+                  <span className="text-sm font-medium text-slate-900 dark:text-white">GitHub</span>
+                </button>
               </div>
-              <button
-                onClick={handleChangeDataPath}
-                disabled={isMigrating}
-                className={cn(
-                  "ml-2 px-2 py-1 rounded-md text-xs transition-colors shrink-0",
-                  isMigrating
-                    ? "text-slate-400 cursor-not-allowed"
-                    : "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20",
-                )}
-              >
-                {isMigrating ? "迁移中..." : "修改"}
-              </button>
             </div>
           </div>
 
-          {/* 左下 - 同步设置 */}
+          {/* 左中 - 同步设置 */}
           <div>
             <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">
               同步设置
@@ -528,7 +519,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
             </div>
           </div>
 
-          {/* 右下 - 日志 */}
+          {/* 右下 - 日志 + 数据存储 */}
           <div>
             <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2 uppercase tracking-wider">
               日志
@@ -568,6 +559,42 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     { value: 50, label: "50 MB" },
                   ]}
                 />
+              </div>
+            </div>
+
+            <h3 className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-2 mt-3 uppercase tracking-wider">
+              数据存储
+            </h3>
+            <div className="space-y-1">
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <div className="w-7 h-7 rounded-md bg-purple-50 dark:bg-purple-900/20 flex items-center justify-center shrink-0">
+                    <Database className="w-3.5 h-3.5 text-purple-500" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-slate-900 dark:text-white">
+                      保存位置
+                    </p>
+                    <p
+                      className="text-xs text-slate-500 dark:text-slate-400 truncate"
+                      title={dataPath}
+                    >
+                      {dataPath || "加载中..."}
+                    </p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleChangeDataPath}
+                  disabled={isMigrating}
+                  className={cn(
+                    "ml-2 px-2 py-1 rounded-md text-xs transition-colors shrink-0",
+                    isMigrating
+                      ? "text-slate-400 cursor-not-allowed"
+                      : "text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20",
+                  )}
+                >
+                  {isMigrating ? "迁移中..." : "修改"}
+                </button>
               </div>
             </div>
           </div>
