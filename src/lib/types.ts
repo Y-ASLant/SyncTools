@@ -96,3 +96,9 @@ export interface LogConfig {
 export interface CacheConfig {
   remoteTtl: number; // 远程存储缓存 TTL（秒），本地存储不使用缓存
 }
+
+// 传输配置
+export interface TransferConfig {
+  chunkSizeMb: number; // 分块大小（MB），默认 8
+  streamThresholdMb: number; // 启用流式传输阈值（MB），默认 128
+}

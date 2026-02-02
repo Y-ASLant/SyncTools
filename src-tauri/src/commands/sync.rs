@@ -303,6 +303,7 @@ pub async fn start_sync(
     let cancel_signals = state.cancel_signals.clone();
     let cache_dir = state.config_dir.join("cache");
     let cache_config = crate::config::CacheConfig::load(&state.config_dir);
+    let transfer_config = crate::config::TransferConfig::load(&state.config_dir);
 
     let resolutions_for_sync = resolutions.clone();
     tokio::spawn(async move {
@@ -312,6 +313,8 @@ pub async fn start_sync(
             conflict_resolutions: resolutions_for_sync,
             cache_dir: Some(cache_dir),
             remote_cache_ttl: cache_config.remote_ttl,
+            chunk_size: transfer_config.chunk_size_mb * 1024 * 1024,
+            large_file_threshold: transfer_config.stream_threshold_mb * 1024 * 1024,
             ..Default::default()
         };
         

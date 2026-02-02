@@ -47,8 +47,8 @@ impl Default for SyncConfig {
     fn default() -> Self {
         Self {
             max_concurrent_transfers: 4, // 默认并行数为4
-            large_file_threshold: 10 * 1024 * 1024, // 10MB
-            chunk_size: 5 * 1024 * 1024,            // 5MB
+            large_file_threshold: 128 * 1024 * 1024, // 128MB（启用流式传输阈值）
+            chunk_size: 8 * 1024 * 1024,             // 8MB（分块大小）
             max_retries: 5,              // 增加重试次数
             retry_base_delay_ms: 2000,   // 增加重试延迟
             enable_resume: true,
@@ -797,6 +797,8 @@ impl SyncEngine {
             let cancelled = cancelled.clone();
             let max_retries = self.config.max_retries;
             let retry_delay = self.config.retry_base_delay_ms;
+            let chunk_size = self.config.chunk_size;
+            let stream_threshold = self.config.large_file_threshold;
             let job_id = job_id.to_string();
 
             let stats_clone = stats.clone();
@@ -810,6 +812,8 @@ impl SyncEngine {
                     &cancelled,
                     &job_id,
                     Some(&stats_clone),
+                    chunk_size,
+                    stream_threshold,
                 )
                 .await;
 
@@ -886,6 +890,8 @@ impl SyncEngine {
         cancelled: &AtomicBool,
         job_id: &str,
         stats: Option<&Arc<TransferStats>>,
+        chunk_size: u64,
+        stream_threshold: u64,
     ) -> Result<RetryResult, String> {
         let mut last_error = String::new();
 
@@ -894,7 +900,7 @@ impl SyncEngine {
                 return Err("操作已取消".to_string());
             }
 
-            match Self::execute_action(action, source, dest, stats).await {
+            match Self::execute_action(action, source, dest, stats, chunk_size, stream_threshold).await {
                 Ok(result) => {
                     // 如果有文件信息，创建 FileState
                     let file_state = if let (Some(path), Some(hash), Some(size)) = 
@@ -952,6 +958,8 @@ impl SyncEngine {
         source: &dyn Storage,
         dest: &dyn Storage,
         stats: Option<&Arc<TransferStats>>,
+        chunk_size: u64,
+        stream_threshold: u64,
     ) -> Result<ActionResult> {
         match action {
             SyncAction::Copy {
@@ -971,20 +979,14 @@ impl SyncEngine {
                     from_path, to_path, size, reverse
                 );
 
-                // Windows 平台对单次 I/O 操作有约 4GB 限制
-                // 对于接近此限制的文件，需要特殊处理
-                const WINDOWS_IO_LIMIT: u64 = 3 * 1024 * 1024 * 1024; // 3GB 安全阈值
-                
-                if *size > WINDOWS_IO_LIMIT {
-                    // 超大文件：临时文件 + 8MB 块流式传输（2026 生产级方案）
-                    // 优点：内存峰值仅 8MB，支持任意大小文件，8MB 块优化网络效率
-                    debug!("  大文件流式传输 ({}GB, 块大小: 8MB)", size / 1024 / 1024 / 1024);
+                // 启用流式传输的阈值（可配置，默认 128MB）
+                // 优点：内存可控，实时进度显示，减少系统调用
+                if *size > stream_threshold {
+                    // 大文件：临时文件 + 分块流式传输
+                    debug!("  流式传输 ({}MB, 块大小: {}MB)", size / 1024 / 1024, chunk_size / 1024 / 1024);
                     
                     use tokio::io::AsyncWriteExt;
                     use futures::stream::StreamExt;
-                    
-                    // 8MB 是网络传输最优块大小（减少系统调用，充分利用带宽）
-                    const CHUNK_SIZE: u64 = 8 * 1024 * 1024; // 8MB
                     
                     let total_size = *size;
                     let temp_dir = std::env::temp_dir();
@@ -998,7 +1000,7 @@ impl SyncEngine {
                     let mut offset = 0u64;
                     
                     while offset < total_size {
-                        let chunk_len = (total_size - offset).min(CHUNK_SIZE);
+                        let chunk_len = (total_size - offset).min(chunk_size);
                         let chunk = from.read_range(from_path, offset, chunk_len).await?;
                         
                         hasher.update(&chunk);
@@ -1011,12 +1013,12 @@ impl SyncEngine {
                     
                     let file_hash = hasher.finalize().to_hex().to_string();
                     
-                    // 阶段2：使用 8MB 块流式上传（关键优化）
-                    debug!("  阶段2: 8MB 块流式上传...");
+                    // 阶段2：分块流式上传
+                    debug!("  阶段2: {}MB 块流式上传...", chunk_size / 1024 / 1024);
                     let temp_file = tokio::fs::File::open(&temp_path).await?;
                     
-                    // 使用 8MB 缓冲区的 ReaderStream（默认是 4KB，太小）
-                    let reader_stream = tokio_util::io::ReaderStream::with_capacity(temp_file, 8 * 1024 * 1024);
+                    // 使用配置的块大小缓冲区的 ReaderStream
+                    let reader_stream = tokio_util::io::ReaderStream::with_capacity(temp_file, chunk_size as usize);
                     
                     let stats_clone = stats.map(|s| s.clone());
                     let byte_stream = reader_stream.map(move |result| {

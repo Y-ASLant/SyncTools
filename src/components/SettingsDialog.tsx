@@ -12,6 +12,8 @@ import {
   FileText,
   HardDrive,
   Clock,
+  Layers,
+  Gauge,
 } from "lucide-react";
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
@@ -20,7 +22,7 @@ import { useSyncStore } from "../lib/store";
 import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
 import { Switch } from "./Switch";
-import type { LogConfig, CacheConfig } from "../lib/types";
+import type { LogConfig, CacheConfig, TransferConfig } from "../lib/types";
 
 // shadcn 风格的 Select 组件
 interface SelectOption {
@@ -130,6 +132,10 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   
   // 缓存配置状态（只对远程存储使用缓存）
   const [remoteCacheTtl, setRemoteCacheTtl] = useState(1800);
+  
+  // 传输配置状态
+  const [chunkSizeMb, setChunkSizeMb] = useState(8);
+  const [streamThresholdMb, setStreamThresholdMb] = useState(128);
 
   // 使用统一的弹窗 Hook
   const { visible, isClosing, handleClose } = useDialog(isOpen, onClose);
@@ -149,6 +155,13 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
       invoke<CacheConfig>("get_cache_config")
         .then((config) => {
           setRemoteCacheTtl(config.remoteTtl);
+        })
+        .catch(console.error);
+      // 加载传输配置
+      invoke<TransferConfig>("get_transfer_config")
+        .then((config) => {
+          setChunkSizeMb(config.chunkSizeMb);
+          setStreamThresholdMb(config.streamThresholdMb);
         })
         .catch(console.error);
     }
@@ -185,6 +198,23 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
       setRemoteCacheTtl(remoteTtl);
     } catch (err) {
       console.error("保存缓存配置失败:", err);
+    }
+  };
+
+  const handleTransferConfigChange = async (chunkSize?: number, threshold?: number) => {
+    try {
+      const newChunkSize = chunkSize ?? chunkSizeMb;
+      const newThreshold = threshold ?? streamThresholdMb;
+      
+      await invoke("set_transfer_config", {
+        chunkSizeMb: newChunkSize,
+        streamThresholdMb: newThreshold,
+      });
+      
+      if (chunkSize !== undefined) setChunkSizeMb(newChunkSize);
+      if (threshold !== undefined) setStreamThresholdMb(newThreshold);
+    } catch (err) {
+      console.error("保存传输配置失败:", err);
     }
   };
 
@@ -449,6 +479,49 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     { value: 1800, label: "30 分钟" },
                     { value: 3600, label: "1 小时" },
                     { value: 7200, label: "2 小时" },
+                  ]}
+                />
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-md bg-violet-50 dark:bg-violet-900/20 flex items-center justify-center">
+                    <Layers className="w-3.5 h-3.5 text-violet-500" />
+                  </div>
+                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                    分块大小
+                  </p>
+                </div>
+                <Select
+                  value={chunkSizeMb}
+                  onChange={(value) => handleTransferConfigChange(value, undefined)}
+                  options={[
+                    { value: 1, label: "1 MB" },
+                    { value: 2, label: "2 MB" },
+                    { value: 4, label: "4 MB" },
+                    { value: 8, label: "8 MB" },
+                    { value: 16, label: "16 MB" },
+                    { value: 32, label: "32 MB" },
+                  ]}
+                />
+              </div>
+              <div className="flex items-center justify-between p-2 rounded-md hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors">
+                <div className="flex items-center gap-2">
+                  <div className="w-7 h-7 rounded-md bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
+                    <Gauge className="w-3.5 h-3.5 text-rose-500" />
+                  </div>
+                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                    流式传输阈值
+                  </p>
+                </div>
+                <Select
+                  value={streamThresholdMb}
+                  onChange={(value) => handleTransferConfigChange(undefined, value)}
+                  options={[
+                    { value: 64, label: "64 MB" },
+                    { value: 128, label: "128 MB" },
+                    { value: 256, label: "256 MB" },
+                    { value: 512, label: "512 MB" },
+                    { value: 1024, label: "1 GB" },
                   ]}
                 />
               </div>
