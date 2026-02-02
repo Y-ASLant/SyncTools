@@ -113,6 +113,7 @@ export function CreateJobDialog({
   });
 
   const isEditing = !!editJob;
+  const [isSavingAsNew, setIsSavingAsNew] = useState(false);
 
   const showMessage = (
     title: string,
@@ -270,6 +271,30 @@ export function CreateJobDialog({
     return null;
   };
 
+  // 构建存储配置
+  const buildStorageConfig = (type: StorageType, isSource: boolean) => {
+    switch (type) {
+      case "local":
+        return { type: "local", path: isSource ? formData.sourceLocalPath : formData.destLocalPath };
+      case "s3":
+        return {
+          type: "s3",
+          bucket: isSource ? formData.sourceS3Bucket : formData.destS3Bucket,
+          region: isSource ? formData.sourceS3Region : formData.destS3Region,
+          accessKey: isSource ? formData.sourceS3AccessKey : formData.destS3AccessKey,
+          secretKey: isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey,
+          endpoint: (isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint) || undefined,
+        };
+      case "webdav":
+        return {
+          type: "webdav",
+          webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint,
+          username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername,
+          password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword,
+        };
+    }
+  };
+
   const handleSubmit = async () => {
     // 验证表单
     const error = validateForm();
@@ -280,29 +305,6 @@ export function CreateJobDialog({
 
     setIsCreating(true);
     try {
-      const buildStorageConfig = (type: StorageType, isSource: boolean) => {
-        switch (type) {
-          case "local":
-            return { type: "local", path: isSource ? formData.sourceLocalPath : formData.destLocalPath };
-          case "s3":
-            return {
-              type: "s3",
-              bucket: isSource ? formData.sourceS3Bucket : formData.destS3Bucket,
-              region: isSource ? formData.sourceS3Region : formData.destS3Region,
-              accessKey: isSource ? formData.sourceS3AccessKey : formData.destS3AccessKey,
-              secretKey: isSource ? formData.sourceS3SecretKey : formData.destS3SecretKey,
-              endpoint: (isSource ? formData.sourceS3Endpoint : formData.destS3Endpoint) || undefined,
-            };
-          case "webdav":
-            return {
-              type: "webdav",
-              webdavEndpoint: isSource ? formData.sourceWebdavEndpoint : formData.destWebdavEndpoint,
-              username: isSource ? formData.sourceWebdavUsername : formData.destWebdavUsername,
-              password: isSource ? formData.sourceWebdavPassword : formData.destWebdavPassword,
-            };
-        }
-      };
-
       if (isEditing && editJob) {
         // 编辑模式：更新任务
         await invoke("update_job", {
@@ -334,6 +336,35 @@ export function CreateJobDialog({
       );
     } finally {
       setIsCreating(false);
+    }
+  };
+
+  // 另存为新任务
+  const handleSaveAsNew = async () => {
+    // 验证表单
+    const error = validateForm();
+    if (error) {
+      showMessage("提示", error, "info");
+      return;
+    }
+
+    setIsSavingAsNew(true);
+    try {
+      await invoke("create_job", {
+        name: formData.name,
+        sourceConfig: buildStorageConfig(formData.sourceType, true),
+        destConfig: buildStorageConfig(formData.destType, false),
+        syncMode: formData.syncMode,
+        schedule: null,
+      });
+
+      onJobCreated();
+      handleClose();
+    } catch (error) {
+      console.error("另存为新任务失败:", error);
+      showMessage("另存为新任务失败", String(error), "error");
+    } finally {
+      setIsSavingAsNew(false);
     }
   };
 
@@ -822,24 +853,41 @@ export function CreateJobDialog({
           )}
           <div className="flex gap-2">
             {isEditing || step === 3 ? (
-              <button
-                onClick={handleSubmit}
-                disabled={isCreating || !formData.name}
-                className={cn(
-                  "px-3 py-1.5 rounded text-sm transition-colors",
-                  isCreating || !formData.name
-                    ? "bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed"
-                    : "bg-blue-500 hover:bg-blue-600 text-white",
+              <>
+                {/* 编辑模式下显示"另存为新任务"按钮 */}
+                {isEditing && (
+                  <button
+                    onClick={handleSaveAsNew}
+                    disabled={isSavingAsNew || isCreating || !formData.name}
+                    className={cn(
+                      "px-3 py-1.5 rounded text-sm transition-colors border",
+                      isSavingAsNew || isCreating || !formData.name
+                        ? "border-slate-200 dark:border-slate-700 text-slate-400 cursor-not-allowed"
+                        : "border-green-500 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20",
+                    )}
+                  >
+                    {isSavingAsNew ? "创建中..." : "另存为新任务"}
+                  </button>
                 )}
-              >
-                {isCreating
-                  ? isEditing
-                    ? "保存中..."
-                    : "创建中..."
-                  : isEditing
-                    ? "保存"
-                    : "创建任务"}
-              </button>
+                <button
+                  onClick={handleSubmit}
+                  disabled={isCreating || isSavingAsNew || !formData.name}
+                  className={cn(
+                    "px-3 py-1.5 rounded text-sm transition-colors",
+                    isCreating || isSavingAsNew || !formData.name
+                      ? "bg-slate-200 dark:bg-slate-700 text-slate-500 cursor-not-allowed"
+                      : "bg-blue-500 hover:bg-blue-600 text-white",
+                  )}
+                >
+                  {isCreating
+                    ? isEditing
+                      ? "保存中..."
+                      : "创建中..."
+                    : isEditing
+                      ? "保存"
+                      : "创建任务"}
+                </button>
+              </>
             ) : (
               <button
                 onClick={() => setStep((step + 1) as 1 | 2 | 3)}

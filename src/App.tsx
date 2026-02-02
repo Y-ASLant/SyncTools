@@ -15,6 +15,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { cn, formatBytes, formatDuration, getStorageTypeLabel, getSyncModeLabel } from "./lib/utils";
+import { NEW_JOB_THRESHOLD_SECONDS } from "./lib/constants";
 import {
   CreateJobDialog,
   SettingsDialog,
@@ -49,9 +50,9 @@ function App() {
     name: string;
   } | null>(null);
   const [diffResult, setDiffResult] = useState<DiffResult | null>(null);
-  const [analyzingJob, setAnalyzingJob] = useState<string | null>(null);
+  const [analyzingJobs, setAnalyzingJobs] = useState<Set<string>>(new Set());
   const [diffJobId, setDiffJobId] = useState<string | null>(null);
-  const analyzeAbortRef = useRef<boolean>(false);
+  const analyzeAbortRef = useRef<Set<string>>(new Set());
   const [filterMode, setFilterMode] = useState<
     "all" | "bidirectional" | "mirror" | "backup"
   >("all");
@@ -250,12 +251,13 @@ function App() {
   };
 
   const handleAnalyzeJob = async (jobId: string, forceRefresh: boolean = false) => {
-    setAnalyzingJob(jobId);
-    analyzeAbortRef.current = false;
+    // 添加到正在分析的任务集合
+    setAnalyzingJobs(prev => new Set(prev).add(jobId));
+    analyzeAbortRef.current.delete(jobId);
     try {
       const result = await invoke<DiffResult>("analyze_job", { jobId, forceRefresh });
       // 如果已取消，忽略结果
-      if (analyzeAbortRef.current) {
+      if (analyzeAbortRef.current.has(jobId)) {
         info("已取消", "分析操作已取消");
         return;
       }
@@ -265,26 +267,33 @@ function App() {
         success("刷新完成", "已重新扫描文件列表");
       }
     } catch (err) {
-      if (!analyzeAbortRef.current) {
+      if (!analyzeAbortRef.current.has(jobId)) {
         console.error("分析任务失败:", err);
         showError("分析失败", String(err));
       }
     } finally {
-      setAnalyzingJob(null);
-      analyzeAbortRef.current = false;
+      // 从正在分析的任务集合中移除
+      setAnalyzingJobs(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(jobId);
+        return newSet;
+      });
+      analyzeAbortRef.current.delete(jobId);
     }
   };
 
-  const handleCancelAnalyze = async () => {
-    if (analyzingJob) {
-      try {
-        await invoke("cancel_analyze", { jobId: analyzingJob });
-      } catch (err) {
-        console.error("取消分析失败:", err);
-      }
+  const handleCancelAnalyze = async (jobId: string) => {
+    try {
+      await invoke("cancel_analyze", { jobId });
+    } catch (err) {
+      console.error("取消分析失败:", err);
     }
-    analyzeAbortRef.current = true;
-    setAnalyzingJob(null);
+    analyzeAbortRef.current.add(jobId);
+    setAnalyzingJobs(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(jobId);
+      return newSet;
+    });
   };
 
   const handleSyncFromDiff = () => {
@@ -473,6 +482,12 @@ function App() {
                           <h3 className="text-sm font-medium text-slate-900 dark:text-white truncate">
                             {job.name}
                           </h3>
+                          {/* 新创建的任务显示 New 标签 */}
+                          {job.createdAt && (Date.now() / 1000 - job.createdAt) < NEW_JOB_THRESHOLD_SECONDS && (
+                            <span className="px-1.5 py-0.5 rounded text-xs bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 font-medium">
+                              New
+                            </span>
+                          )}
                           {!job.enabled && (
                             <span className="px-1.5 py-0.5 rounded text-xs bg-slate-100 dark:bg-slate-800 text-slate-500">
                               禁用
@@ -511,30 +526,26 @@ function App() {
                           <>
                             <button
                               onClick={
-                                analyzingJob === job.id
-                                  ? handleCancelAnalyze
+                                analyzingJobs.has(job.id)
+                                  ? () => handleCancelAnalyze(job.id)
                                   : () => handleAnalyzeJob(job.id)
                               }
-                              disabled={
-                                analyzingJob === job.id
-                                  ? false
-                                  : !job.enabled || analyzingJob !== null
-                              }
+                              disabled={!job.enabled && !analyzingJobs.has(job.id)}
                               className={cn(
                                 "flex items-center justify-center gap-1 px-2 py-1 rounded text-xs transition-colors btn-press",
-                                analyzingJob === job.id
+                                analyzingJobs.has(job.id)
                                   ? "bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 hover:bg-red-100 dark:hover:bg-red-900/30 hover:text-red-600 dark:hover:text-red-400"
-                                  : !job.enabled || analyzingJob !== null
+                                  : !job.enabled
                                     ? "bg-slate-100 dark:bg-slate-800 text-slate-400 cursor-not-allowed"
                                     : "bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600",
                               )}
                               title={
-                                analyzingJob === job.id
+                                analyzingJobs.has(job.id)
                                   ? "点击取消"
                                   : "分析差异"
                               }
                             >
-                              {analyzingJob === job.id ? (
+                              {analyzingJobs.has(job.id) ? (
                                 <>
                                   <RefreshCw className="w-3 h-3 animate-spin" />
                                   取消
@@ -548,10 +559,10 @@ function App() {
                             </button>
                             <button
                               onClick={() => handleAnalyzeJob(job.id, true)}
-                              disabled={!job.enabled || analyzingJob !== null}
+                              disabled={!job.enabled || analyzingJobs.has(job.id)}
                               className={cn(
                                 "p-1 rounded transition-colors",
-                                !job.enabled || analyzingJob !== null
+                                !job.enabled || analyzingJobs.has(job.id)
                                   ? "text-slate-300 dark:text-slate-700 cursor-not-allowed"
                                   : "text-slate-400 hover:text-blue-500 hover:bg-slate-100 dark:hover:bg-slate-800",
                               )}
