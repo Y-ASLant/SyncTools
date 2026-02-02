@@ -13,6 +13,12 @@ import {
 } from "lucide-react";
 import { cn, formatBytes } from "../lib/utils";
 import { useDialog } from "../hooks";
+import {
+  DIFF_VIEW_PAGE_SIZE,
+  SECONDS_PER_MINUTE,
+  SECONDS_PER_HOUR,
+  SECONDS_PER_DAY,
+} from "../lib/constants";
 
 export interface DiffAction {
   type: "copy" | "delete" | "skip" | "conflict";
@@ -58,7 +64,7 @@ export function DiffViewDialog({
   );
   const [isPending, startTransition] = useTransition();
   const [currentPage, setCurrentPage] = useState(1);
-  const pageSize = 100;
+  const pageSize = DIFF_VIEW_PAGE_SIZE;
 
   const { visible, isClosing, handleClose } = useDialog(
     isOpen && !!diffResult,
@@ -104,10 +110,10 @@ export function DiffViewDialog({
     if (!cachedAt) return null;
     const now = Math.floor(Date.now() / 1000);
     const age = now - cachedAt;
-    if (age < 60) return `${age}秒前`;
-    if (age < 3600) return `${Math.floor(age / 60)}分钟前`;
-    if (age < 86400) return `${Math.floor(age / 3600)}小时前`;
-    return `${Math.floor(age / 86400)}天前`;
+    if (age < SECONDS_PER_MINUTE) return `${age}秒前`;
+    if (age < SECONDS_PER_HOUR) return `${Math.floor(age / SECONDS_PER_MINUTE)}分钟前`;
+    if (age < SECONDS_PER_DAY) return `${Math.floor(age / SECONDS_PER_HOUR)}小时前`;
+    return `${Math.floor(age / SECONDS_PER_DAY)}天前`;
   };
 
   const sourceCacheAge = formatCacheAge(diffResult.sourceCachedAt);

@@ -14,6 +14,47 @@ use std::time::{Duration, Instant};
 use tokio::sync::{mpsc, RwLock, Semaphore};
 use tracing::{debug, error, info, warn};
 
+// ============================================================================
+// 常量定义
+// ============================================================================
+
+/// 默认并发传输数
+const DEFAULT_MAX_CONCURRENT: usize = 4;
+/// 默认流式传输阈值（128MB）
+const DEFAULT_STREAM_THRESHOLD: u64 = 128 * 1024 * 1024;
+/// 默认分块大小（8MB）
+const DEFAULT_CHUNK_SIZE: u64 = 8 * 1024 * 1024;
+/// 默认最大重试次数
+const DEFAULT_MAX_RETRIES: u32 = 5;
+/// 默认重试基础延迟（毫秒）
+const DEFAULT_RETRY_BASE_DELAY_MS: u64 = 2000;
+/// 默认远程缓存 TTL（秒，30分钟）
+const DEFAULT_REMOTE_CACHE_TTL: u64 = 1800;
+/// 文件扫描并发数
+const SCANNER_CONCURRENCY: usize = 8;
+/// 进度更新间隔（毫秒）
+const PROGRESS_UPDATE_INTERVAL_MS: u64 = 500;
+/// 重试指数退避基数
+const RETRY_BACKOFF_BASE: u64 = 2;
+
+// ============================================================================
+// 参数封装结构体
+// ============================================================================
+
+/// 重试配置
+#[derive(Clone, Copy)]
+struct RetryConfig {
+    max_retries: u32,
+    base_delay_ms: u64,
+}
+
+/// 传输参数
+#[derive(Clone, Copy)]
+struct TransferParams {
+    chunk_size: u64,
+    stream_threshold: u64,
+}
+
 /// 同步配置
 #[derive(Debug, Clone)]
 pub struct SyncConfig {
@@ -46,18 +87,18 @@ pub struct SyncConfig {
 impl Default for SyncConfig {
     fn default() -> Self {
         Self {
-            max_concurrent_transfers: 4, // 默认并行数为4
-            large_file_threshold: 128 * 1024 * 1024, // 128MB（启用流式传输阈值）
-            chunk_size: 8 * 1024 * 1024,             // 8MB（分块大小）
-            max_retries: 5,              // 增加重试次数
-            retry_base_delay_ms: 2000,   // 增加重试延迟
+            max_concurrent_transfers: DEFAULT_MAX_CONCURRENT,
+            large_file_threshold: DEFAULT_STREAM_THRESHOLD,
+            chunk_size: DEFAULT_CHUNK_SIZE,
+            max_retries: DEFAULT_MAX_RETRIES,
+            retry_base_delay_ms: DEFAULT_RETRY_BASE_DELAY_MS,
             enable_resume: true,
             scan_config: ScanConfig::default(),
             auto_create_dir: true,
             conflict_resolutions: std::collections::HashMap::new(),
             force_refresh: false,
             cache_dir: None,
-            remote_cache_ttl: 1800, // 默认 30 分钟
+            remote_cache_ttl: DEFAULT_REMOTE_CACHE_TTL,
         }
     }
 }
@@ -265,7 +306,7 @@ impl SyncEngine {
         )
         .await;
 
-        let scanner = FileScanner::with_config(8, self.config.scan_config.clone());
+        let scanner = FileScanner::with_config(SCANNER_CONCURRENCY, self.config.scan_config.clone());
 
         // 初始化缓存管理器（只对远程存储使用缓存），缓存目录跟随数据存储目录
         let cache_dir = self.config.cache_dir.clone()
@@ -715,7 +756,7 @@ impl SyncEngine {
             let mut last_time = Instant::now();
 
             loop {
-                tokio::time::sleep(Duration::from_millis(500)).await;
+                tokio::time::sleep(Duration::from_millis(PROGRESS_UPDATE_INTERVAL_MS)).await;
 
                 if cancelled_clone.load(Ordering::SeqCst) {
                     break;
@@ -795,10 +836,14 @@ impl SyncEngine {
             let errors = errors.clone();
             let synced_states = synced_states.clone();
             let cancelled = cancelled.clone();
-            let max_retries = self.config.max_retries;
-            let retry_delay = self.config.retry_base_delay_ms;
-            let chunk_size = self.config.chunk_size;
-            let stream_threshold = self.config.large_file_threshold;
+            let retry_config = RetryConfig {
+                max_retries: self.config.max_retries,
+                base_delay_ms: self.config.retry_base_delay_ms,
+            };
+            let transfer_params = TransferParams {
+                chunk_size: self.config.chunk_size,
+                stream_threshold: self.config.large_file_threshold,
+            };
             let job_id = job_id.to_string();
 
             let stats_clone = stats.clone();
@@ -807,13 +852,11 @@ impl SyncEngine {
                     &action,
                     source.as_ref(),
                     dest.as_ref(),
-                    max_retries,
-                    retry_delay,
+                    retry_config,
                     &cancelled,
                     &job_id,
                     Some(&stats_clone),
-                    chunk_size,
-                    stream_threshold,
+                    transfer_params,
                 )
                 .await;
 
@@ -885,22 +928,20 @@ impl SyncEngine {
         action: &SyncAction,
         source: &dyn Storage,
         dest: &dyn Storage,
-        max_retries: u32,
-        base_delay_ms: u64,
+        retry_config: RetryConfig,
         cancelled: &AtomicBool,
         job_id: &str,
         stats: Option<&Arc<TransferStats>>,
-        chunk_size: u64,
-        stream_threshold: u64,
+        transfer_params: TransferParams,
     ) -> Result<RetryResult, String> {
         let mut last_error = String::new();
 
-        for attempt in 0..=max_retries {
+        for attempt in 0..=retry_config.max_retries {
             if cancelled.load(Ordering::SeqCst) {
                 return Err("操作已取消".to_string());
             }
 
-            match Self::execute_action(action, source, dest, stats, chunk_size, stream_threshold).await {
+            match Self::execute_action(action, source, dest, stats, transfer_params).await {
                 Ok(result) => {
                     // 如果有文件信息，创建 FileState
                     let file_state = if let (Some(path), Some(hash), Some(size)) = 
@@ -924,19 +965,19 @@ impl SyncEngine {
                 Err(e) => {
                     last_error = e.to_string();
 
-                    if attempt < max_retries {
+                    if attempt < retry_config.max_retries {
                         // 指数退避
-                        let delay = base_delay_ms * (2_u64.pow(attempt));
+                        let delay = retry_config.base_delay_ms * RETRY_BACKOFF_BASE.pow(attempt);
                         warn!(
                             "操作失败，{}ms 后重试 ({}/{}): {}",
                             delay,
                             attempt + 1,
-                            max_retries,
+                            retry_config.max_retries,
                             last_error
                         );
                         tokio::time::sleep(Duration::from_millis(delay)).await;
                     } else {
-                        error!("操作最终失败 (已重试{}次): {}", max_retries, last_error);
+                        error!("操作最终失败 (已重试{}次): {}", retry_config.max_retries, last_error);
                     }
                 }
             }
@@ -958,8 +999,7 @@ impl SyncEngine {
         source: &dyn Storage,
         dest: &dyn Storage,
         stats: Option<&Arc<TransferStats>>,
-        chunk_size: u64,
-        stream_threshold: u64,
+        transfer_params: TransferParams,
     ) -> Result<ActionResult> {
         match action {
             SyncAction::Copy {
@@ -981,8 +1021,9 @@ impl SyncEngine {
 
                 // 启用流式传输的阈值（可配置，默认 128MB）
                 // 优点：内存可控，实时进度显示，减少系统调用
-                if *size > stream_threshold {
+                if *size > transfer_params.stream_threshold {
                     // 大文件：临时文件 + 分块流式传输
+                    let chunk_size = transfer_params.chunk_size;
                     debug!("  流式传输 ({}MB, 块大小: {}MB)", size / 1024 / 1024, chunk_size / 1024 / 1024);
                     
                     use tokio::io::AsyncWriteExt;

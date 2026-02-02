@@ -13,6 +13,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { cn, getSyncModeLabel, getStorageTypeLabel } from "../lib/utils";
 import { useDialog } from "../hooks";
 import { MessageDialog } from "./MessageDialog";
+import { DEFAULT_S3_REGION } from "../lib/constants";
 import type {
   StorageType,
   SyncMode,
@@ -75,7 +76,7 @@ export function CreateJobDialog({
     // 源存储配置
     sourceLocalPath: "",
     sourceS3Bucket: "",
-    sourceS3Region: "us-east-1",
+    sourceS3Region: DEFAULT_S3_REGION,
     sourceS3AccessKey: "",
     sourceS3SecretKey: "",
     sourceS3Endpoint: "",
@@ -85,7 +86,7 @@ export function CreateJobDialog({
     // 目标存储配置
     destLocalPath: "",
     destS3Bucket: "",
-    destS3Region: "us-east-1",
+    destS3Region: DEFAULT_S3_REGION,
     destS3AccessKey: "",
     destS3SecretKey: "",
     destS3Endpoint: "",
@@ -131,7 +132,7 @@ export function CreateJobDialog({
       syncMode: "backup",
       sourceLocalPath: "",
       sourceS3Bucket: "",
-      sourceS3Region: "us-east-1",
+      sourceS3Region: DEFAULT_S3_REGION,
       sourceS3AccessKey: "",
       sourceS3SecretKey: "",
       sourceS3Endpoint: "",
@@ -140,7 +141,7 @@ export function CreateJobDialog({
       sourceWebdavPassword: "",
       destLocalPath: "",
       destS3Bucket: "",
-      destS3Region: "us-east-1",
+      destS3Region: DEFAULT_S3_REGION,
       destS3AccessKey: "",
       destS3SecretKey: "",
       destS3Endpoint: "",
@@ -169,7 +170,7 @@ export function CreateJobDialog({
         // 源存储配置
         sourceLocalPath: editJob.sourceConfig.path || "",
         sourceS3Bucket: editJob.sourceConfig.bucket || "",
-        sourceS3Region: editJob.sourceConfig.region || "us-east-1",
+        sourceS3Region: editJob.sourceConfig.region || DEFAULT_S3_REGION,
         sourceS3AccessKey: editJob.sourceConfig.accessKey || "",
         sourceS3SecretKey: editJob.sourceConfig.secretKey || "",
         sourceS3Endpoint: editJob.sourceConfig.endpoint || "",
@@ -179,7 +180,7 @@ export function CreateJobDialog({
         // 目标存储配置
         destLocalPath: editJob.destConfig.path || "",
         destS3Bucket: editJob.destConfig.bucket || "",
-        destS3Region: editJob.destConfig.region || "us-east-1",
+        destS3Region: editJob.destConfig.region || DEFAULT_S3_REGION,
         destS3AccessKey: editJob.destConfig.accessKey || "",
         destS3SecretKey: editJob.destConfig.secretKey || "",
         destS3Endpoint: editJob.destConfig.endpoint || "",

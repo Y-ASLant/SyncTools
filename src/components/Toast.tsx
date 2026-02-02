@@ -1,6 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
 import { CheckCircle, XCircle, AlertCircle, Info, X } from "lucide-react";
 import { cn } from "../lib/utils";
+import {
+  TOAST_DEFAULT_DURATION,
+  TOAST_ERROR_DURATION,
+  TOAST_EXIT_ANIMATION_DELAY,
+  Z_INDEX_TOAST,
+} from "../lib/constants";
 
 export type ToastType = "success" | "error" | "warning" | "info";
 
@@ -38,14 +44,14 @@ function Toast({ toast, onClose }: ToastProps) {
 
   const handleClose = useCallback(() => {
     setIsExiting(true);
-    setTimeout(() => onClose(toast.id), 150);
+    setTimeout(() => onClose(toast.id), TOAST_EXIT_ANIMATION_DELAY);
   }, [onClose, toast.id]);
 
   useEffect(() => {
     if (toast.duration !== 0) {
       const timer = setTimeout(() => {
         handleClose();
-      }, toast.duration || 5000);
+      }, toast.duration || TOAST_DEFAULT_DURATION);
       return () => clearTimeout(timer);
     }
   }, [toast.id, toast.duration, handleClose]);
@@ -88,7 +94,7 @@ export function ToastContainer({ toasts, onClose }: ToastContainerProps) {
   if (toasts.length === 0) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
+    <div className={`fixed bottom-4 right-4 z-${Z_INDEX_TOAST} flex flex-col gap-2 max-w-sm`}>
       {toasts.map((toast) => (
         <Toast key={toast.id} toast={toast} onClose={onClose} />
       ))}
@@ -141,7 +147,7 @@ export function useToast() {
     success: (title: string, message?: string) =>
       showToast("success", title, message),
     error: (title: string, message?: string) =>
-      showToast("error", title, message, 8000),
+      showToast("error", title, message, TOAST_ERROR_DURATION),
     warning: (title: string, message?: string) =>
       showToast("warning", title, message),
     info: (title: string, message?: string) =>

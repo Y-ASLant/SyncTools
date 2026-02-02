@@ -8,6 +8,19 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, State};
 
+// ============================================================================
+// 常量定义
+// ============================================================================
+
+/// 默认并发传输数
+const DEFAULT_MAX_CONCURRENT: usize = 4;
+/// 最小并发传输数
+const MIN_CONCURRENT: usize = 1;
+/// 最大并发传输数
+const MAX_CONCURRENT: usize = 128;
+/// 进度通道缓冲区大小
+const PROGRESS_CHANNEL_BUFFER: usize = 100;
+
 /// 差异分析结果
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -261,7 +274,7 @@ pub async fn start_sync(
     app: AppHandle,
 ) -> Result<String, String> {
     let auto_create = auto_create_dir.unwrap_or(true);
-    let concurrent = max_concurrent.unwrap_or(4).clamp(1, 128); // 限制在 1-128 之间
+    let concurrent = max_concurrent.unwrap_or(DEFAULT_MAX_CONCURRENT).clamp(MIN_CONCURRENT, MAX_CONCURRENT);
     let resolutions = conflict_resolutions.unwrap_or_default();
     // 从数据库加载任务
     let job = SyncJob::load(&state.db, &job_id)
@@ -275,7 +288,7 @@ pub async fn start_sync(
     }
 
     // 创建进度通道
-    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<crate::db::SyncProgress>(100);
+    let (progress_tx, mut progress_rx) = tokio::sync::mpsc::channel::<crate::db::SyncProgress>(PROGRESS_CHANNEL_BUFFER);
 
     // 创建取消信号通道
     let (cancel_tx, cancel_rx) = tokio::sync::oneshot::channel::<()>();

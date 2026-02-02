@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatBytes, formatTime } from "../lib/utils";
 import { useDialog } from "../hooks";
 import type { SyncHistoryEntry } from "../lib/types";
+import { HISTORY_QUERY_LIMIT, SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from "../lib/constants";
 
 interface HistoryPanelProps {
   isOpen: boolean;
@@ -33,7 +34,7 @@ export function HistoryPanel({
     try {
       const result = await invoke<SyncHistoryEntry[]>("get_sync_history", {
         jobId,
-        limit: 50,
+        limit: HISTORY_QUERY_LIMIT,
       });
       setHistory(result);
     } catch (error) {
@@ -46,10 +47,10 @@ export function HistoryPanel({
   const formatHistoryDuration = (start: number, end: number | null) => {
     if (!end) return "-";
     const seconds = end - start;
-    if (seconds < 60) return `${seconds}秒`;
-    const minutes = Math.floor(seconds / 60);
-    if (minutes < 60) return `${minutes}分${seconds % 60}秒`;
-    return `${Math.floor(minutes / 60)}时${minutes % 60}分`;
+    if (seconds < SECONDS_PER_MINUTE) return `${seconds}秒`;
+    const minutes = Math.floor(seconds / SECONDS_PER_MINUTE);
+    if (minutes < SECONDS_PER_MINUTE) return `${minutes}分${seconds % SECONDS_PER_MINUTE}秒`;
+    return `${Math.floor(minutes / SECONDS_PER_MINUTE)}时${minutes % SECONDS_PER_MINUTE}分`;
   };
 
   const getStatusIcon = (status: string) => {

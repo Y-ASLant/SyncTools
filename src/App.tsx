@@ -60,6 +60,58 @@ function App() {
   const [conflictJobId, setConflictJobId] = useState<string | null>(null);
   const { toasts, closeToast, success, error: showError, info } = useToast();
 
+  // 禁用浏览器默认行为（右键菜单、快捷键）
+  useEffect(() => {
+    // 禁用右键菜单
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    // 禁用浏览器快捷键
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ctrl+R / Cmd+R - 刷新
+      if ((e.ctrlKey || e.metaKey) && e.key === 'r') {
+        e.preventDefault();
+      }
+      // Ctrl+P / Cmd+P - 打印
+      if ((e.ctrlKey || e.metaKey) && e.key === 'p') {
+        e.preventDefault();
+      }
+      // Ctrl+S / Cmd+S - 保存
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+      }
+      // Ctrl+Shift+I / Cmd+Option+I - 开发者工具
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'I') {
+        e.preventDefault();
+      }
+      // Ctrl+Shift+J / Cmd+Option+J - 控制台
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'J') {
+        e.preventDefault();
+      }
+      // Ctrl+U / Cmd+U - 查看源代码
+      if ((e.ctrlKey || e.metaKey) && e.key === 'u') {
+        e.preventDefault();
+      }
+      // F5 - 刷新
+      if (e.key === 'F5') {
+        e.preventDefault();
+      }
+      // F12 - 开发者工具
+      if (e.key === 'F12') {
+        e.preventDefault();
+      }
+    };
+
+    document.addEventListener('contextmenu', handleContextMenu);
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('contextmenu', handleContextMenu);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   // 初始化：加载任务列表和设置事件监听
   useEffect(() => {
     let mounted = true;
