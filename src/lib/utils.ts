@@ -15,18 +15,6 @@ export function formatBytes(bytes: number): string {
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(2))} ${sizes[i]}`;
 }
 
-// 格式化持续时间（秒）
-export function formatDuration(seconds: number): string {
-  if (seconds < 60) return `${seconds}秒`;
-  if (seconds < 3600) return `${Math.floor(seconds / 60)}分${seconds % 60}秒`;
-  return `${Math.floor(seconds / 3600)}时${Math.floor((seconds % 3600) / 60)}分`;
-}
-
-// 格式化传输速度
-export function formatSpeed(bytesPerSecond: number): string {
-  return `${formatBytes(bytesPerSecond)}/s`;
-}
-
 // 格式化时间戳
 export function formatTime(timestamp: number): string {
   return new Date(timestamp * 1000).toLocaleString("zh-CN", {

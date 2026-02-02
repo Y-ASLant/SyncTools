@@ -208,8 +208,8 @@ impl SyncEngine {
                 bytesTransferred: 0,
                 bytesTotal: 0,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: 0,
             },
         )
         .await;
@@ -239,8 +239,8 @@ impl SyncEngine {
             }
         };
 
-        // 检测目标目录是否可访问
-        match dest_storage.list_files(None).await {
+        // 快速检测目标目录是否可访问（使用 stat 而不是 list_files，避免递归扫描）
+        match dest_storage.stat("").await {
             Ok(_) => {
                 debug!("目标存储可访问");
             }
@@ -253,8 +253,8 @@ impl SyncEngine {
                         // 尝试创建根目录
                         if let Err(create_err) = dest_storage.create_dir("/").await {
                             debug!("创建根目录失败: {}", create_err);
-                            // 再次尝试 list 检查是否可用
-                            if dest_storage.list_files(None).await.is_err() {
+                            // 再次检查是否可用
+                            if dest_storage.stat("").await.is_err() {
                                 warn!("目标目录不存在且无法创建");
                                 return Ok(self.create_failed_report(
                                     &job_id,
@@ -300,8 +300,8 @@ impl SyncEngine {
                 bytesTransferred: 0,
                 bytesTotal: 0,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: 0,
             },
         )
         .await;
@@ -342,8 +342,8 @@ impl SyncEngine {
                         bytesTransferred: 0,
                         bytesTotal: 0,
                         speed: 0,
-                        eta: 0,
                         startTime: start_time,
+                        endTime: 0,
                     },
                 )
                 .await;
@@ -402,8 +402,8 @@ impl SyncEngine {
                 bytesTransferred: 0,
                 bytesTotal: 0,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: 0,
             },
         )
         .await;
@@ -426,8 +426,8 @@ impl SyncEngine {
                         bytesTransferred: 0,
                         bytesTotal: 0,
                         speed: 0,
-                        eta: 0,
                         startTime: start_time,
+                        endTime: 0,
                     },
                 )
                 .await;
@@ -448,8 +448,8 @@ impl SyncEngine {
                         bytesTransferred: 0,
                         bytesTotal: 0,
                         speed: 0,
-                        eta: 0,
                         startTime: start_time,
+                        endTime: 0,
                     },
                 )
                 .await;
@@ -513,8 +513,8 @@ impl SyncEngine {
                 bytesTransferred: 0,
                 bytesTotal: 0,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: 0,
             },
         )
         .await;
@@ -615,8 +615,8 @@ impl SyncEngine {
                 bytesTransferred: 0,
                 bytesTotal: bytes_total,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: 0,
             },
         )
         .await;
@@ -680,8 +680,8 @@ impl SyncEngine {
                 bytesTransferred: bytes_transferred,
                 bytesTotal: bytes_total,
                 speed: 0,
-                eta: 0,
                 startTime: start_time,
+                endTime: chrono::Utc::now().timestamp(),  // 记录完成时间
             },
         )
         .await;
@@ -691,10 +691,11 @@ impl SyncEngine {
             job_id, files_copied, files_deleted, files_failed
         );
 
-        // 同步完成后清除缓存（文件列表已变化）
+        // 同步完成后清除所有缓存（文件列表已变化）
         if files_copied > 0 || files_deleted > 0 {
             source_cache.clear(&job_id);
-            debug!("已清除扫描缓存");
+            dest_cache.clear(&job_id);
+            debug!("已清除源和目标扫描缓存");
         }
 
         Ok(SyncReport {
@@ -754,7 +755,6 @@ impl SyncEngine {
         let progress_handle = tokio::spawn(async move {
             let mut last_bytes = 0u64;
             let mut last_time = Instant::now();
-            let transfer_start = Instant::now();
             // 使用指数移动平均平滑速度（权重 0.3 给新值，0.7 给旧值）
             let mut smoothed_speed: f64 = 0.0;
             const SPEED_SMOOTHING_FACTOR: f64 = 0.3;
@@ -790,21 +790,6 @@ impl SyncEngine {
 
                 let speed = smoothed_speed as u64;
 
-                // 计算 ETA（使用平均速度更稳定）
-                let total_elapsed = transfer_start.elapsed().as_secs_f64();
-                let avg_speed = if total_elapsed > 1.0 && bytes > 0 {
-                    bytes as f64 / total_elapsed
-                } else {
-                    smoothed_speed
-                };
-                
-                let remaining_bytes = bytes_total.saturating_sub(bytes);
-                let eta = if avg_speed > 100.0 {  // 最小 100 字节/秒才显示 ETA
-                    (remaining_bytes as f64 / avg_speed) as u64
-                } else {
-                    0
-                };
-
                 if let Some(tx) = &progress_tx_clone {
                     debug!(
                         "进度更新: {}/{} MB ({:.1}%), 速度: {:.2} MB/s",
@@ -828,8 +813,8 @@ impl SyncEngine {
                             bytesTransferred: bytes,
                             bytesTotal: bytes_total,
                             speed,
-                            eta,
                             startTime: start_time,
+                            endTime: 0,
                         })
                         .await;
                 } else {
@@ -1061,6 +1046,7 @@ impl SyncEngine {
                     let temp_path = temp_dir.join(&temp_filename);
                     
                     // 阶段1：分块读取源文件，写入临时文件，计算 hash
+                    // 下载进度：在读取时更新 50% 进度（改善下载体验）
                     debug!("  阶段1: 缓存到临时文件...");
                     let mut temp_file = tokio::fs::File::create(&temp_path).await?;
                     let mut hasher = blake3::Hasher::new();
@@ -1069,10 +1055,16 @@ impl SyncEngine {
                     while offset < total_size {
                         let chunk_len = (total_size - offset).min(chunk_size);
                         let chunk = from.read_range(from_path, offset, chunk_len).await?;
+                        let chunk_actual_len = chunk.len() as u64;
                         
                         hasher.update(&chunk);
                         temp_file.write_all(&chunk).await?;
-                        offset += chunk.len() as u64;
+                        offset += chunk_actual_len;
+                        
+                        // 阶段1（读取/下载）更新 50% 进度
+                        if let Some(ref s) = stats {
+                            s.bytes_transferred.fetch_add(chunk_actual_len / 2, Ordering::Relaxed);
+                        }
                     }
                     
                     temp_file.flush().await?;
@@ -1080,7 +1072,7 @@ impl SyncEngine {
                     
                     let file_hash = hasher.finalize().to_hex().to_string();
                     
-                    // 阶段2：分块流式上传
+                    // 阶段2：分块流式上传（更新剩余 50% 进度）
                     debug!("  阶段2: {}MB 块流式上传...", chunk_size / 1024 / 1024);
                     let temp_file = tokio::fs::File::open(&temp_path).await?;
                     
@@ -1091,11 +1083,11 @@ impl SyncEngine {
                     let byte_stream = reader_stream.map(move |result| {
                         result
                             .map(|bytes| {
-                                let len = bytes.len();
+                                let len = bytes.len() as u64;
                                 
-                                // 更新上传进度（真实网速）
+                                // 阶段2（上传）更新剩余 50% 进度
                                 if let Some(ref s) = stats_clone {
-                                    s.bytes_transferred.fetch_add(len as u64, Ordering::Relaxed);
+                                    s.bytes_transferred.fetch_add(len - len / 2, Ordering::Relaxed);
                                 }
                                 
                                 bytes.to_vec()
@@ -1118,7 +1110,13 @@ impl SyncEngine {
                 
                 // 常规文件传输
                 let data = from.read(from_path).await?;
-                debug!("  读取完成: {} 实际{}字节", from_path, data.len());
+                let actual_size = data.len() as u64;
+                debug!("  读取完成: {} 实际{}字节", from_path, actual_size);
+                
+                // 读取完成后更新 50% 进度（改善下载体验）
+                if let Some(s) = &stats {
+                    s.bytes_transferred.fetch_add(actual_size / 2, Ordering::Relaxed);
+                }
 
                 // 计算文件 hash（用于增量同步）
                 let file_hash = calculate_quick_hash(&data);
@@ -1127,9 +1125,9 @@ impl SyncEngine {
                 to.write(to_path, data).await?;
                 debug!("  写入完成: {}", to_path);
                 
-                // 更新进度
+                // 写入完成后更新剩余进度
                 if let Some(s) = stats {
-                    s.bytes_transferred.fetch_add(*size, Ordering::Relaxed);
+                    s.bytes_transferred.fetch_add(actual_size - actual_size / 2, Ordering::Relaxed);
                 }
 
                 Ok(ActionResult {

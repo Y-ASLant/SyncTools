@@ -24,6 +24,8 @@ pub struct WebDavStorage {
     endpoint: String,
     username: String,
     password: String,
+    /// 保存 root 路径用于剥离服务器返回的完整路径
+    root_path: String,
 }
 
 impl WebDavStorage {
@@ -80,6 +82,9 @@ impl WebDavStorage {
         let mut initial_dirs = HashSet::new();
         initial_dirs.insert("/".to_string());
 
+        // 保存 root 路径用于后续路径处理
+        let root_path = root.clone().unwrap_or_default();
+        
         Ok(Self {
             operator,
             http_client,
@@ -88,6 +93,7 @@ impl WebDavStorage {
             endpoint: endpoint.to_string(),
             username: username.to_string(),
             password: password.to_string(),
+            root_path,
         })
     }
 
@@ -152,35 +158,88 @@ impl WebDavStorage {
 impl Storage for WebDavStorage {
     async fn list_files(&self, prefix: Option<&str>) -> Result<Vec<FileInfo>> {
         let mut files = Vec::new();
-        let path = prefix.unwrap_or("");
-
-        // 使用 lister_with 进行递归列表
-        let mut lister = self
-            .operator
-            .lister_with(path)
-            .recursive(true)
-            .metakey(Metakey::ContentLength | Metakey::LastModified | Metakey::Mode)
-            .await?;
-
-        while let Some(entry) = lister.try_next().await? {
-            let path_str = entry.path().to_string();
-
-            // 跳过根目录
-            if path_str.is_empty() || path_str == "/" {
+        let start_path = prefix.unwrap_or("").to_string();
+        
+        // 计算 root 前缀（用于剥离服务器返回的完整路径）
+        let root_prefix = self.root_path.trim_start_matches('/').trim_end_matches('/');
+        let root_prefix_with_slash = if root_prefix.is_empty() {
+            String::new()
+        } else {
+            format!("{}/", root_prefix)
+        };
+        
+        // 使用栈进行手动递归扫描（某些 WebDAV 服务器不支持 recursive）
+        let mut dirs_to_scan = vec![start_path];
+        let mut scanned_dirs = std::collections::HashSet::new();
+        
+        while let Some(current_dir) = dirs_to_scan.pop() {
+            // 避免重复扫描
+            if scanned_dirs.contains(&current_dir) {
                 continue;
             }
+            scanned_dirs.insert(current_dir.clone());
+            
+            // 列出当前目录
+            let mut lister = match self
+                .operator
+                .lister_with(&current_dir)
+                .metakey(Metakey::ContentLength | Metakey::LastModified | Metakey::Mode)
+                .await
+            {
+                Ok(l) => l,
+                Err(e) => {
+                    tracing::warn!("无法列出目录 {}: {}", current_dir, e);
+                    continue;
+                }
+            };
 
-            let meta = entry.metadata();
+            while let Some(entry) = lister.try_next().await? {
+                let path_str = entry.path().to_string();
 
-            files.push(FileInfo {
-                path: path_str.trim_start_matches('/').to_string(),
-                size: meta.content_length(),
-                modified_time: meta.last_modified().map_or(0, |t| t.timestamp()),
-                is_dir: meta.is_dir(),
-                checksum: meta.etag().map(|s| s.trim_matches('"').to_string()),
-            });
+                // 跳过根目录
+                if path_str.is_empty() || path_str == "/" {
+                    continue;
+                }
+
+                // URL 解码路径（WebDAV 服务器可能返回编码后的路径）
+                let decoded_path = urlencoding::decode(&path_str)
+                    .map(|s| s.into_owned())
+                    .unwrap_or_else(|_| path_str.clone());
+                
+                // 剥离 root 前缀（服务器可能返回包含 root 的完整路径）
+                let relative_path = decoded_path
+                    .trim_start_matches('/')
+                    .strip_prefix(&root_prefix_with_slash)
+                    .unwrap_or(decoded_path.trim_start_matches('/'));
+                
+                let meta = entry.metadata();
+                let is_dir = meta.is_dir() || path_str.ends_with('/');
+                
+                if is_dir {
+                    // 将子目录加入待扫描队列（使用相对路径）
+                    let dir_path = relative_path.trim_end_matches('/').to_string() + "/";
+                    if !scanned_dirs.contains(&dir_path) && !dir_path.is_empty() && dir_path != "/" {
+                        dirs_to_scan.push(dir_path);
+                    }
+                }
+
+                // 跳过空路径（root 本身）
+                let final_path = relative_path.trim_end_matches('/');
+                if final_path.is_empty() {
+                    continue;
+                }
+
+                files.push(FileInfo {
+                    path: final_path.to_string(),
+                    size: meta.content_length(),
+                    modified_time: meta.last_modified().map_or(0, |t| t.timestamp()),
+                    is_dir,
+                    checksum: meta.etag().map(|s| s.trim_matches('"').to_string()),
+                });
+            }
         }
 
+        tracing::info!("WebDAV 扫描完成: {} 个条目 ({} 个目录已扫描)", files.len(), scanned_dirs.len());
         Ok(files)
     }
 

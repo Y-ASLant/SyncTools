@@ -143,6 +143,9 @@ async fn main() {
             synctools_lib::commands::cache::set_cache_config,
             synctools_lib::commands::transfer::get_transfer_config,
             synctools_lib::commands::transfer::set_transfer_config,
+            synctools_lib::commands::shell::show_in_folder,
+            synctools_lib::commands::shell::rename_file,
+            synctools_lib::commands::shell::delete_file,
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

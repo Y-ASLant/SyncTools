@@ -117,9 +117,10 @@ pub async fn analyze_job(
     let source_config_json = serde_json::to_string(&job.sourceConfig).unwrap_or_default();
     let dest_config_json = serde_json::to_string(&job.destConfig).unwrap_or_default();
 
-    // 如果强制刷新，先清除缓存
+    // 如果强制刷新，先清除所有缓存
     if force_refresh {
         source_cache.clear(&job_id);
+        dest_cache.clear(&job_id);
     }
 
     // 扫描源存储（支持缓存）

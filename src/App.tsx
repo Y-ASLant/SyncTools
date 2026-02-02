@@ -14,7 +14,7 @@ import {
   ArrowLeftRight,
   RotateCcw,
 } from "lucide-react";
-import { cn, formatBytes, formatDuration, getStorageTypeLabel, getSyncModeLabel } from "./lib/utils";
+import { cn, getStorageTypeLabel, getSyncModeLabel } from "./lib/utils";
 import { NEW_JOB_THRESHOLD_SECONDS } from "./lib/constants";
 import {
   CreateJobDialog,
@@ -26,6 +26,8 @@ import {
   ConfirmDialog,
   DiffViewDialog,
   ConflictDialog,
+  AnimatedBytes,
+  AnimatedSpeed,
 } from "./components";
 import type { SyncProgress, SyncJob } from "./lib/types";
 import type { DiffResult, ConflictInfo, ConflictResolution } from "./components";
@@ -632,21 +634,22 @@ function App() {
                           />
                         </div>
                         <div className="flex items-center justify-between text-xs text-slate-400 mt-1">
-                          <span className="truncate max-w-xs">
+                          <span className="truncate max-w-[200px]">
                             {jobProgress.currentFile ||
                               (jobProgress.filesScanned
                                 ? `已扫描 ${jobProgress.filesScanned} 个文件`
                                 : "")}
                           </span>
-                          <div className="flex items-center gap-2">
-                            {jobProgress.speed > 0 && (
-                              <span>{formatBytes(jobProgress.speed)}/s</span>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {/* 已传输字节数（带动画） */}
+                            {jobProgress.bytesTotal > 0 && (
+                              <AnimatedBytes 
+                                transferred={jobProgress.bytesTransferred} 
+                                total={jobProgress.bytesTotal} 
+                              />
                             )}
-                            {jobProgress.eta > 0 && (
-                              <span>
-                                剩余 {formatDuration(jobProgress.eta)}
-                              </span>
-                            )}
+                            {/* 速度（带动画） */}
+                            <AnimatedSpeed speed={jobProgress.speed} />
                           </div>
                         </div>
                       </div>
@@ -659,8 +662,8 @@ function App() {
                           <RefreshCw className="w-3 h-3" />
                           <span>
                             完成，共 {jobProgress.filesCompleted} 个文件
-                            {jobProgress.startTime > 0 && (() => {
-                              const duration = Math.floor(Date.now() / 1000) - jobProgress.startTime;
+                            {jobProgress.startTime > 0 && jobProgress.endTime > 0 && (() => {
+                              const duration = jobProgress.endTime - jobProgress.startTime;
                               if (duration < 60) return `，用时 ${duration}秒`;
                               if (duration < 3600) return `，用时 ${Math.floor(duration / 60)}分${duration % 60}秒`;
                               return `，用时 ${Math.floor(duration / 3600)}时${Math.floor((duration % 3600) / 60)}分`;

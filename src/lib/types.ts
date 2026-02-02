@@ -58,8 +58,8 @@ export interface SyncProgress {
   bytesTransferred: number;
   bytesTotal: number;
   speed: number;
-  eta: number;
   startTime: number;
+  endTime: number;  // 完成时间（0 表示未完成）
 }
 
 // 同步历史记录

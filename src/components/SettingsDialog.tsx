@@ -327,7 +327,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     theme === "light" ? "text-orange-500" : "text-slate-500",
                   )}
                 />
-                <span className="text-xs font-medium text-slate-900 dark:text-white">
+                <span className="text-sm font-medium text-slate-900 dark:text-white">
                   浅色
                 </span>
               </button>
@@ -346,7 +346,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     theme === "dark" ? "text-indigo-500" : "text-slate-500",
                   )}
                 />
-                <span className="text-xs font-medium text-slate-900 dark:text-white">
+                <span className="text-sm font-medium text-slate-900 dark:text-white">
                   深色
                 </span>
               </button>
@@ -365,7 +365,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                     theme === "system" ? "text-blue-500" : "text-slate-500",
                   )}
                 />
-                <span className="text-xs font-medium text-slate-900 dark:text-white">
+                <span className="text-sm font-medium text-slate-900 dark:text-white">
                   系统
                 </span>
               </button>
@@ -384,11 +384,11 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <Database className="w-3.5 h-3.5 text-purple-500" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     保存位置
                   </p>
                   <p
-                    className="text-[10px] text-slate-500 dark:text-slate-400 truncate"
+                    className="text-xs text-slate-500 dark:text-slate-400 truncate"
                     title={dataPath}
                   >
                     {dataPath || "加载中..."}
@@ -421,7 +421,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-amber-50 dark:bg-amber-900/20 flex items-center justify-center">
                     <Zap className="w-3.5 h-3.5 text-amber-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     并行传输数
                   </p>
                 </div>
@@ -448,7 +448,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-green-50 dark:bg-green-900/20 flex items-center justify-center">
                     <FolderPlus className="w-3.5 h-3.5 text-green-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     自动创建目录
                   </p>
                 </div>
@@ -465,7 +465,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-cyan-50 dark:bg-cyan-900/20 flex items-center justify-center">
                     <Clock className="w-3.5 h-3.5 text-cyan-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     远程缓存过期
                   </p>
                 </div>
@@ -487,7 +487,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-violet-50 dark:bg-violet-900/20 flex items-center justify-center">
                     <Layers className="w-3.5 h-3.5 text-violet-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     分块大小
                   </p>
                 </div>
@@ -509,7 +509,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-rose-50 dark:bg-rose-900/20 flex items-center justify-center">
                     <Gauge className="w-3.5 h-3.5 text-rose-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     流式传输阈值
                   </p>
                 </div>
@@ -539,7 +539,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center">
                     <FileText className="w-3.5 h-3.5 text-blue-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     启用日志
                   </p>
                 </div>
@@ -553,7 +553,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                   <div className="w-7 h-7 rounded-md bg-cyan-50 dark:bg-cyan-900/20 flex items-center justify-center">
                     <HardDrive className="w-3.5 h-3.5 text-cyan-500" />
                   </div>
-                  <p className="text-xs font-medium text-slate-900 dark:text-white">
+                  <p className="text-sm font-medium text-slate-900 dark:text-white">
                     大小限制
                   </p>
                 </div>

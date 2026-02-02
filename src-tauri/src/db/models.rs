@@ -94,8 +94,8 @@ pub struct SyncProgress {
     pub bytesTransferred: u64,
     pub bytesTotal: u64,
     pub speed: u64,
-    pub eta: u64,
     pub startTime: i64,
+    pub endTime: i64,  // 完成时间（0 表示未完成）
 }
 
 /// 同步报告

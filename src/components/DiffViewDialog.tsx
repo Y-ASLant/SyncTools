@@ -11,6 +11,7 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
+import { invoke } from "@tauri-apps/api/core";
 import { cn, formatBytes } from "../lib/utils";
 import { useDialog } from "../hooks";
 import {
@@ -19,6 +20,7 @@ import {
   SECONDS_PER_HOUR,
   SECONDS_PER_DAY,
 } from "../lib/constants";
+import { ContextMenu, type ContextMenuItem, MenuIcons } from "./ContextMenu";
 
 export interface DiffAction {
   type: "copy" | "delete" | "skip" | "conflict";
@@ -53,18 +55,37 @@ interface DiffViewDialogProps {
   onSync: () => void;
 }
 
+// 右键菜单状态
+interface ContextMenuState {
+  x: number;
+  y: number;
+  path: string;
+  fullPath: string;
+  isSource: boolean;
+}
+
 export function DiffViewDialog({
   isOpen,
   onClose,
   diffResult,
   onSync,
 }: DiffViewDialogProps) {
+  // 从 sourceName 中提取本地路径（格式如 "local:F:\Sync"）
+  const sourceLocalPath = useMemo(() => {
+    if (!diffResult?.sourceName) return undefined;
+    const name = diffResult.sourceName;
+    if (name.startsWith("local:")) {
+      return name.slice(6); // 去掉 "local:" 前缀
+    }
+    return undefined;
+  }, [diffResult?.sourceName]);
   const [filter, setFilter] = useState<"all" | "copy" | "delete" | "skip">(
     "all",
   );
   const [isPending, startTransition] = useTransition();
   const [currentPage, setCurrentPage] = useState(1);
   const pageSize = DIFF_VIEW_PAGE_SIZE;
+  const [contextMenu, setContextMenu] = useState<ContextMenuState | null>(null);
 
   const { visible, isClosing, handleClose } = useDialog(
     isOpen && !!diffResult,
@@ -153,6 +174,76 @@ export function DiffViewDialog({
     const frontChars = Math.ceil(charsToShow / 2);
     const backChars = Math.floor(charsToShow / 2);
     return path.slice(0, frontChars) + ellipsis + path.slice(-backChars);
+  };
+
+  // 处理右键菜单
+  const handleContextMenu = (
+    e: React.MouseEvent,
+    path: string,
+    isSource: boolean,
+    exists: boolean
+  ) => {
+    e.preventDefault();
+    if (!exists) return;
+    
+    // 构建完整路径
+    let fullPath = "";
+    if (isSource && sourceLocalPath) {
+      // 源是本地路径
+      fullPath = `${sourceLocalPath.replace(/\\/g, "/")}/${path}`.replace(/\/+/g, "/");
+    }
+    
+    if (fullPath) {
+      setContextMenu({
+        x: e.clientX,
+        y: e.clientY,
+        path,
+        fullPath,
+        isSource,
+      });
+    }
+  };
+
+  // 在文件管理器中显示
+  const handleShowInFolder = async () => {
+    if (!contextMenu) return;
+    try {
+      await invoke("show_in_folder", { path: contextMenu.fullPath });
+    } catch (err) {
+      console.error("打开目录失败:", err);
+    }
+  };
+
+  // 复制路径到剪贴板
+  const handleCopyPath = async () => {
+    if (!contextMenu) return;
+    try {
+      await navigator.clipboard.writeText(contextMenu.fullPath);
+    } catch (err) {
+      console.error("复制路径失败:", err);
+    }
+  };
+
+  // 生成右键菜单项
+  const getContextMenuItems = (): ContextMenuItem[] => {
+    if (!contextMenu) return [];
+    
+    const items: ContextMenuItem[] = [
+      {
+        id: "open-folder",
+        label: "打开所在目录",
+        icon: MenuIcons.openFolder,
+        onClick: handleShowInFolder,
+      },
+      {
+        id: "copy-path",
+        label: "复制完整路径",
+        icon: MenuIcons.copy,
+        onClick: handleCopyPath,
+      },
+    ];
+    
+    return items;
   };
 
   return (
@@ -271,7 +362,13 @@ export function DiffViewDialog({
                   className="grid grid-cols-[1fr,auto,1fr] gap-2 px-4 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50"
                 >
                   {/* 源文件 */}
-                  <div className="flex items-center gap-2 min-w-0">
+                  <div 
+                    className={cn(
+                      "flex items-center gap-2 min-w-0",
+                      action.sourceExists && sourceLocalPath && "cursor-pointer"
+                    )}
+                    onContextMenu={(e) => handleContextMenu(e, action.path, true, action.sourceExists)}
+                  >
                     {action.sourceExists ? (
                       <>
                         <FileText className="w-4 h-4 text-slate-400 flex-shrink-0" />
@@ -396,6 +493,16 @@ export function DiffViewDialog({
           </div>
         </div>
       </div>
+
+      {/* 右键菜单 */}
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={getContextMenuItems()}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }
