@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { formatBytes, formatTime } from "../lib/utils";
 import { useDialog } from "../hooks";
 import type { SyncHistoryEntry } from "../lib/types";
-import { HISTORY_QUERY_LIMIT, SECONDS_PER_MINUTE, SECONDS_PER_HOUR } from "../lib/constants";
+import { HISTORY_QUERY_LIMIT, SECONDS_PER_MINUTE } from "../lib/constants";
 
 interface HistoryPanelProps {
   isOpen: boolean;
